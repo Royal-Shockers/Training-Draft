@@ -1,6 +1,8 @@
 import { TEAM_NAME } from "./config.js";
 import { createStore, LIVE, newId } from "./store.js";
 import { computeStats, validateMatch, winRate, pick, RESULTS, emptyRec } from "./stats.js";
+import { PROXY_READY, normTag, validTag, fetchPlayer, fetchBattles, forget } from "./bsapi.js";
+import { readBattles, toSessions, aggregate, extreme, pretty } from "./bsstats.js";
 
 // ---------------- state ----------------
 const saved = (() => { try { return JSON.parse(localStorage.getItem("btt-ui")) || {}; } catch { return {}; } })();
@@ -20,6 +22,10 @@ const state = {
   form: null,
   editing: null,
   members: null,
+  players: [],                 // saved player tags, shared by the team
+  profile: null,               // { tag, loading, error, player, battles }
+  tagInput: "",
+  pSub: "overview",
 };
 const persistUi = () => {
   try {
@@ -89,12 +95,14 @@ function renderTop() {
   $("#demo-banner").hidden = LIVE;
 
   const tabs = [["dashboard", "Dashboard"], ["log", state.editing ? "Edit match" : "Log match"], ["matches", "Matches"],
-    ["team", "Team"], ["enemy", "Enemy"], ["lists", "Lists"]];
+    ["players", "Players"], ["team", "Team"], ["enemy", "Enemy"], ["lists", "Lists"]];
   if (isOwner() && LIVE) tabs.push(["members", "Teammates"]);
   $("#tabs").innerHTML = tabs.map(([id, label]) =>
     `<button class="tab tab-${id}${state.tab === id ? " on" : ""}" data-tab="${id}">${label}</button>`).join("");
 
   const f = state.filter;
+  // The date filters only apply to your own logged games, not to live API profiles.
+  $(".controls-in").hidden = state.tab === "players";
   $("#f-from").value = f.from; $("#f-to").value = f.to; $("#f-min").value = f.minGames;
   $("#f-warn").textContent = f.from && f.to && f.from > f.to ? "Start date is after the end date, so no games match." : "";
 }
@@ -369,10 +377,219 @@ function viewMembers() {
     <ul class="items members">${list.map(e => `<li><span>${esc(e)}</span><button class="link danger" data-act="unmember" data-id="${esc(e)}">Remove</button></li>`).join("") || `<li class="empty">No teammates added yet.</li>`}</ul>`;
 }
 
+// ---------------- players: live profiles from the Brawl Stars API ----------------
+let profileSeq = 0;
+function loadProfile(raw) {
+  const tag = normTag(raw);
+  if (!validTag(tag)) { toast("That doesn't look like a player tag. They look like #Y2PLQQCGP.", true); return; }
+  const seq = ++profileSeq;
+  state.profile = { tag, loading: true };
+  state.pSub = "overview";
+  render();
+  (async () => {
+    let next;
+    try {
+      const [player, items] = await Promise.all([fetchPlayer(tag), fetchBattles(tag)]);
+      next = { tag, player, battles: readBattles(items, tag) };
+    } catch (e) {
+      next = { tag, error: e.message || String(e) };
+    }
+    if (seq !== profileSeq) return; // a newer lookup has started
+    state.profile = next;
+    render();
+  })();
+}
+
+const num = n => (typeof n === "number" ? n.toLocaleString() : "—");
+const whenShort = at => new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const trophyTxt = n => (n > 0 ? `+${n}` : n < 0 ? String(n) : "0");
+const resCell = b => (b.result
+  ? `<span class="res res-${b.result}">${RESULTS[b.result]}</span>`
+  : b.rank != null ? `<span class="res res-D">#${b.rank}</span>` : "");
+
+function savedTags() {
+  const list = state.players || [];
+  const cur = state.profile && state.profile.player;
+  const saved = cur && list.some(p => normTag(p.tag) === normTag(cur.tag));
+  const chips = list.map(p => `<span class="tagchip${state.profile && normTag(p.tag) === state.profile.tag ? " on" : ""}">
+      <button class="link" data-act="loadtag" data-id="${esc(p.tag)}">${esc(p.label || p.tag)}</button>
+      ${canEdit() ? `<button class="link danger" data-act="untag" data-id="${esc(p.tag)}" aria-label="Remove ${esc(p.label || p.tag)}">×</button>` : ""}
+    </span>`).join("");
+  const add = cur && canEdit() && !saved
+    ? `<button class="btn btn-ghost" data-act="savetag">Save ${esc(cur.name || cur.tag)} to the team</button>` : "";
+  if (!chips && !add) return "";
+  return `<div class="tagchips">${chips}${add}</div>`;
+}
+
+function battleTable(key, battles, opts = {}) {
+  const cols = [
+    { id: "at", label: "When", get: b => b.at, fmt: b => esc(whenShort(b.at)) },
+    { id: "kind", label: "Type", get: b => (b.ranked ? "Ranked" : pretty(b.type)), fmt: b =>
+      `<span class="chip ${b.ranked ? "blue" : ""}">${esc(b.ranked ? (b.type === "teamranked" ? "Team Ranked" : "Solo Ranked") : pretty(b.type) || "—")}</span>` },
+    { id: "mode", label: "Mode", get: b => b.mode },
+    { id: "map", label: "Map", get: b => b.map },
+    { id: "brawler", label: "Brawler", get: b => b.brawler, fmt: b =>
+      `${esc(b.brawler) || "—"}${b.starPlayer ? ' <span class="star" title="Star player">★</span>' : ""}` },
+    { id: "res", label: "Result", get: b => ({ W: 2, D: 1, L: 0 }[b.result] ?? -1), fmt: resCell },
+    { id: "tr", label: "Trophies", num: true, get: b => b.trophyChange, fmt: b => (b.trophyChange == null ? "" : trophyTxt(b.trophyChange)) },
+  ];
+  // Ranked games don't move trophies, so drop that column when every game here is ranked.
+  const shown = battles.some(b => b.trophyChange != null) ? cols : cols.filter(c => c.id !== "tr");
+  return table(key, shown, battles, { defaultSort: { col: "at", dir: -1 }, empty: "No games here.", ...opts });
+}
+
+function recTable(key, map, label, empty) {
+  const rows = [...map.values()];
+  const cols = [{ id: "name", label, get: r => r.name, fmt: r => `<strong>${esc(r.name)}</strong>` }, ...recCols(r => r.rec)];
+  return table(key, cols, rows, { defaultSort: { col: "g", dir: -1 }, empty });
+}
+
+function viewPlayerOverview(p) {
+  const pl = p.player;
+  const all = aggregate(p.battles);
+  const wr = winRate(all.rec);
+  const tile = (label, value, sub = "", side = "blue") => `<div class="tile ${side}">
+      <div class="tile-label">${label}</div><div class="tile-value">${value}</div>
+      ${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
+  return `<div class="tiles">
+      ${tile("Trophies", num(pl.trophies), `Highest ${num(pl.highestTrophies)}`)}
+      ${tile("3v3 wins", num(pl["3vs3Victories"]))}
+      ${tile("Solo / Duo wins", `${num(pl.soloVictories)} / ${num(pl.duoVictories)}`)}
+      ${tile("Experience", `Level ${num(pl.expLevel)}`, `${num(pl.expPoints)} XP`)}
+      ${tile("Brawlers", num((pl.brawlers || []).length), "Tap the Brawlers tab for the full list")}
+      ${tile("Club", pl.club && pl.club.name ? esc(pl.club.name) : "No club", pl.club && pl.club.tag ? esc(pl.club.tag) : "")}
+    </div>
+    <h2>Last ${p.battles.length} game${p.battles.length === 1 ? "" : "s"}</h2>
+    <div class="tiles">
+      ${tile("Record", `${all.rec.w}–${all.rec.l}${all.rec.d ? `–${all.rec.d}` : ""}`, wr == null ? "" : `${pct(wr)} win rate`)}
+      ${tile("Trophy change", trophyTxt(all.trophy), "Ranked games don't move trophies")}
+      ${tile("Star player", `${all.star}×`)}
+    </div>
+    ${battleTable("p-all", p.battles)}`;
+}
+
+function viewPlayerSessions(p) {
+  const sessions = toSessions(p.battles);
+  if (!sessions.length) return `<p class="empty">No games in the battle log.</p>`;
+  return `<p class="hint">A session is a run of games less than 30 minutes apart — the same way Corestats groups them.</p>
+    ${sessions.map((s, i) => {
+      const wr = winRate(s.rec);
+      return `<section class="session">
+        <div class="session-head">
+          <h3>${esc(whenShort(s.from))} → ${esc(new Date(s.to).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }))}</h3>
+          <div class="session-sum">
+            <strong>${s.rec.w}–${s.rec.l}${s.rec.d ? `–${s.rec.d}` : ""}</strong>
+            ${wr == null ? "" : `<span>${pct(wr, 0)} win rate</span>`}
+            <span class="${s.trophy > 0 ? "up" : s.trophy < 0 ? "down" : ""}">${trophyTxt(s.trophy)} trophies</span>
+            <span>${s.battles.length} game${s.battles.length === 1 ? "" : "s"}</span>
+          </div>
+        </div>
+        ${battleTable("p-session-" + i, s.battles)}
+      </section>`;
+    }).join("")}`;
+}
+
+function viewPlayerRanked(p) {
+  const ranked = p.battles.filter(b => b.ranked);
+  if (!ranked.length) {
+    return `<p class="empty">No Ranked games in the last ${p.battles.length} battles. The API only keeps the most recent 25,
+      so ranked stats appear here once this player has played some.</p>`;
+  }
+  const a = aggregate(ranked);
+  const wr = winRate(a.rec);
+  const best = extreme(a.brawler, "best"), worst = extreme(a.brawler, "worst");
+  const tile = (label, value, sub = "", side = "blue") => `<div class="tile ${side}">
+      <div class="tile-label">${label}</div><div class="tile-value">${value}</div>
+      ${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
+  const brawlerTxt = x => `${pct(x.wr, 0)} · ${x.rec.g} game${x.rec.g === 1 ? "" : "s"}`;
+  return `<p class="hint">Worked out from the Ranked games in this player's battle log. Supercell's API doesn't give out
+      rank tiers, so there's no Bronze/Gold/Masters badge to show — no site has one.</p>
+    <div class="tiles">
+      ${tile("Ranked record", `${a.rec.w}–${a.rec.l}${a.rec.d ? `–${a.rec.d}` : ""}`, wr == null ? "" : `${pct(wr)} win rate`)}
+      ${tile("Best brawler", best ? esc(best.name) : "—", best ? brawlerTxt(best) : "Needs 2+ games on one brawler")}
+      ${tile("Worst brawler", worst ? esc(worst.name) : "—", worst ? brawlerTxt(worst) : "Needs 2+ games on one brawler", "red")}
+    </div>
+    <h2>Brawlers</h2>${recTable("p-rb", a.brawler, "Brawler", "No ranked games.")}
+    <h2>Maps</h2>${recTable("p-rmap", a.map, "Map", "No ranked games.")}
+    <h2>Modes</h2>${recTable("p-rmode", a.mode, "Mode", "No ranked games.")}
+    <h2>Every ranked game</h2>${battleTable("p-ranked", ranked)}`;
+}
+
+function viewPlayerPeople(p) {
+  const a = aggregate(p.battles);
+  return `<p class="hint">From the same 25 games: how it went with each teammate, and against each opponent.
+      Opponent win rate is how often <em>they</em> beat this player.</p>
+    <h2>Teammates</h2>${recTable("p-mates", a.mates, "Teammate", "No team games in the log.")}
+    <h2>Opponents</h2>${recTable("p-foes", a.foes, "Opponent", "No opponents in the log.")}`;
+}
+
+function viewPlayerBrawlers(p) {
+  const rows = p.player.brawlers || [];
+  const cols = [
+    { id: "name", label: "Brawler", get: b => b.name, fmt: b =>
+      `<span class="bwrap"><img class="bimg" src="https://cdn.brawlify.com/brawlers/borderless/${encodeURIComponent(b.id)}.png"
+        alt="" loading="lazy" onerror="this.remove()"><strong>${esc(b.name)}</strong></span>` },
+    { id: "power", label: "Power", num: true, get: b => b.power },
+    { id: "rank", label: "Rank", num: true, get: b => b.rank },
+    { id: "trophies", label: "Trophies", num: true, get: b => b.trophies },
+    { id: "highest", label: "Highest", num: true, get: b => b.highestTrophies },
+    { id: "gears", label: "Gears", get: b => (b.gears || []).length,
+      fmt: b => esc((b.gears || []).map(g => g.name).join(", ")) || "—" },
+    { id: "sp", label: "Star powers", num: true, get: b => (b.starPowers || []).length },
+    { id: "gadgets", label: "Gadgets", num: true, get: b => (b.gadgets || []).length },
+  ];
+  return `<p class="hint">${rows.length} brawler${rows.length === 1 ? "" : "s"} unlocked. Sort by any column.</p>
+    ${table("p-brawlers", cols, rows, { defaultSort: { col: "trophies", dir: -1 }, empty: "No brawlers in this profile." })}`;
+}
+
+function viewPlayers() {
+  if (!PROXY_READY) {
+    return `<div class="notice"><h2>Live player stats aren't switched on yet</h2>
+      <p>This tab reads live profiles straight from Supercell's Brawl Stars API. That API's key can't live in this
+        website's code — the repo is public, and keys only work from one fixed IP address. So it sits in a tiny free
+        Cloudflare Worker instead, and the site asks the worker.</p>
+      <p>The worker and its setup steps are in <code>worker/README.md</code> — about five minutes, no credit card.
+        When it's running, paste its address into <code>PROXY_URL</code> in <code>config.js</code> and this tab turns on.</p></div>`;
+  }
+  const p = state.profile;
+  const head = `<div class="bar"><h2>Players</h2>
+      ${p && p.player ? `<button class="btn btn-ghost" data-act="refreshprofile">Refresh</button>` : ""}</div>
+    <form class="addrow tagform" data-form="tag">
+      <input name="tag" placeholder="#Y2PLQQCGP" value="${esc(state.tagInput)}" maxlength="16" aria-label="Player tag" autocapitalize="characters" spellcheck="false">
+      <button class="btn btn-gold" type="submit">Look up</button>
+    </form>
+    ${savedTags()}`;
+
+  if (!p) {
+    return head + `<p class="hint">Type a player tag to see their live profile: trophies, brawlers, and everything
+      calculable from their last 25 games — sessions, ranked win rates, and records with each teammate and opponent.
+      A tag is in the game under your name, and looks like <code>#Y2PLQQCGP</code>.</p>
+      <p class="hint">This is a live snapshot. Your Matches tab is still what gives the team long-term history.</p>`;
+  }
+  if (p.loading) return head + `<p class="empty">Loading #${esc(p.tag)}…</p>`;
+  if (p.error) return head + `<div class="notice"><h2>Couldn't load #${esc(p.tag)}</h2><p>${esc(p.error)}</p></div>`;
+
+  const pl = p.player;
+  const color = /^0x[0-9a-fA-F]{8}$/.test(pl.nameColor || "") ? "#" + pl.nameColor.slice(-6) : "";
+  const subs = [["overview", "Overview"], ["sessions", "Sessions"], ["ranked", "Ranked"], ["people", "Teammates & opponents"], ["brawlers", "Brawlers"]];
+  const views = { overview: viewPlayerOverview, sessions: viewPlayerSessions, ranked: viewPlayerRanked, people: viewPlayerPeople, brawlers: viewPlayerBrawlers };
+  const sub = views[state.pSub] ? state.pSub : "overview";
+  return head + `<section class="phead">
+      <h2 ${color ? `style="color:${esc(color)}"` : ""}>${esc(pl.name || "")}</h2>
+      <span class="ptag">#${esc(p.tag)}</span>
+      ${pl.club && pl.club.name ? `<span class="chip blue">${esc(pl.club.name)}</span>` : ""}
+    </section>
+    <div class="subtabs">${subs.map(([id, label]) =>
+      `<button class="subtab${sub === id ? " on" : ""}" data-psub="${id}">${label}</button>`).join("")}</div>
+    ${views[sub](p)}`;
+}
+
 // ---------------- render ----------------
 function render() {
   renderTop();
   const el = main();
+  // Players reads the live API, not your database, so it works before the lists load or sign-in.
+  if (state.tab === "players") { el.innerHTML = viewPlayers(); return; }
   if (state.readError && !state.lists) {
     el.innerHTML = `<div class="notice"><h2>Sign in to see the stats</h2><p>${esc(state.readError)}</p>
       ${!state.user && LIVE ? `<button class="btn btn-gold" data-act="signin">Sign in with Google</button>` : ""}</div>`;
@@ -388,7 +605,7 @@ function render() {
   }
   const S = computeStats(state.matches, state.lists, state.filter);
   const views = {
-    dashboard: () => viewDashboard(S), log: viewLog, matches: () => viewMatches(S),
+    dashboard: () => viewDashboard(S), log: viewLog, matches: () => viewMatches(S), players: viewPlayers,
     team: () => viewSide("team", S), enemy: () => viewSide("enemy", S), lists: viewLists, members: viewMembers,
   };
   el.innerHTML = (views[state.tab] || views.dashboard)();
@@ -497,6 +714,7 @@ function onClick(e) {
     window.scrollTo({ top: 0 });
     render(); return;
   }
+  if (t.dataset.psub) { state.pSub = t.dataset.psub; window.scrollTo({ top: 0 }); render(); return; }
   if (t.dataset.sub) {
     const [side, sub] = t.dataset.sub.split(":"); state.sub[side] = sub; state.search = ""; state.rowLimit = 300; render(); return;
   }
@@ -547,6 +765,20 @@ function onClick(e) {
       }), "Deleted.");
       break;
     }
+    case "loadtag": state.tagInput = "#" + normTag(id); loadProfile(id); break;
+    case "refreshprofile": forget(state.profile.tag); loadProfile(state.profile.tag); break;
+    case "savetag": {
+      const pl = state.profile.player;
+      const tag = normTag(pl.tag || state.profile.tag), label = pl.name || tag;
+      run(() => store.savePlayers(list => {
+        if (list.some(x => normTag(x.tag) === tag)) return list;
+        return [...list, { tag, label }].sort((a, b) => (a.label || a.tag).localeCompare(b.label || b.tag));
+      }), `${label} saved.`);
+      break;
+    }
+    case "untag":
+      run(() => store.savePlayers(list => list.filter(x => normTag(x.tag) !== normTag(id))), "Removed.");
+      break;
     case "unmember":
       if (confirm(`Remove ${id}? They'll no longer be able to log games.`)) {
         run(async () => { await store.removeMember(id); state.members = await store.listMembers(); render(); }, "Teammate removed.");
@@ -586,6 +818,7 @@ function onChange(e) {
 }
 
 function onInput(e) {
+  if (e.target.name === "tag") { state.tagInput = e.target.value; return; } // no re-render: keeps the caret put
   if (e.target.dataset.act === "search") {
     state.search = e.target.value; state.rowLimit = 300;
     const pos = e.target.selectionStart;
@@ -616,6 +849,7 @@ function onSubmit(e) {
     }
     return;
   }
+  if (kind === "tag") { state.tagInput = form.tag.value; loadProfile(form.tag.value); return; }
   if (kind === "add-member") {
     const email = form.email.value.trim().toLowerCase();
     run(async () => { await store.addMember(email); state.members = await store.listMembers(); render(); }, "Teammate added.");
@@ -648,6 +882,7 @@ $("#f-clear").addEventListener("click", () => { state.filter = { ...state.filter
     store = await createStore({
       lists: L => { state.lists = L; state.readError = ""; if (L) indexLists(); render(); },
       matches: ms => { state.matches = ms; render(); },
+      players: ps => { state.players = ps; render(); },
       user: u => { state.user = u; state.members = null; if (!isOwner() && state.tab === "members") state.tab = "dashboard"; render(); },
       error: msg => { state.readError = msg; render(); },
     });

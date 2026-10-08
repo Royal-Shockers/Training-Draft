@@ -52,14 +52,20 @@ function createDemoStore(h) {
   let data = null;
   try { data = JSON.parse(localStorage.getItem(KEY)); } catch { data = null; }
   if (!data) { const lists = defaultLists(); data = { lists, matches: sampleMatches(lists) }; }
+  data.players ||= [];
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch { /* storage full or blocked */ } };
   save(); // keep the same sample games on every visit
-  const emit = () => { h.lists(structuredClone(data.lists)); h.matches(data.matches.map(m => ({ ...m }))); };
+  const emit = () => {
+    h.lists(structuredClone(data.lists));
+    h.matches(data.matches.map(m => ({ ...m })));
+    h.players(data.players.map(p => ({ ...p })));
+  };
   setTimeout(() => { h.user({ email: "demo", name: "Demo user", role: "owner" }); emit(); }, 0);
   return {
     live: false,
     async signIn() {}, async signOut() {},
     async saveLists(fn) { data.lists = fn(structuredClone(data.lists)); save(); emit(); },
+    async savePlayers(fn) { data.players = fn(data.players.map(p => ({ ...p }))); save(); emit(); },
     async seedLists() { data.lists = defaultLists(); save(); emit(); },
     async addMatches(ms) { for (const m of ms) data.matches.push({ ...clean(m), id: m.id || newId() }); save(); emit(); },
     async updateMatch(old, m) { data.matches = data.matches.map(x => (x.id === old.id ? { ...clean(m), id: old.id } : x)); save(); emit(); },
@@ -92,6 +98,7 @@ async function createFirebaseStore(h) {
   const auth = A.getAuth(app);
   const db = F.getFirestore(app);
   const listsRef = F.doc(db, "config", "lists");
+  const playersRef = F.doc(db, "config", "players"); // saved Brawl Stars tags, shared by the team
   let email = "";
   let unsubs = [];
 
@@ -106,6 +113,8 @@ async function createFirebaseStore(h) {
         });
         h.matches(out);
       }, e => h.error(friendly(e, email), "read")),
+      // Saved tags are a nicety: if they can't be read, the Players tab just starts empty.
+      F.onSnapshot(playersRef, s => h.players((s.exists() && s.data().list) || []), () => h.players([])),
     ];
   };
 
@@ -140,6 +149,10 @@ async function createFirebaseStore(h) {
       const s = await tx.get(listsRef);
       if (!s.exists()) throw new Error("The lists aren't set up yet.");
       tx.set(listsRef, fn(s.data()));
+    })),
+    savePlayers: fn => guard(() => F.runTransaction(db, async tx => {
+      const s = await tx.get(playersRef);
+      tx.set(playersRef, { list: fn((s.exists() && s.data().list) || []) });
     })),
     seedLists: () => guard(() => F.runTransaction(db, async tx => {
       const s = await tx.get(listsRef);
