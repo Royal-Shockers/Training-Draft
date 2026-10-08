@@ -1,19 +1,12 @@
-// ===== The only file you need to edit =====
+export const TEAM_NAME = "Royal Shockers";
 
-// 1. Your team's name (shown at the top of the site).
-export const TEAM_NAME = "My Team";
+export const OWNER_EMAIL = "royalennyop@gmail.com";
 
-// 2. The Google email you'll sign in with. This account is the owner:
-//    it can add teammates and set up the lists.
-export const OWNER_EMAIL = "you@gmail.com";
-
-// 3. Paste the firebaseConfig from Firebase (Project settings ▸ Your apps ▸ SDK setup and configuration).
-//    While apiKey still says "PASTE_HERE", the site runs in demo mode and only saves to your own browser.
 export const firebaseConfig = {
-  apiKey: "PASTE_HERE",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: "",
+  apiKey: "AIzaSyBNmhwbsTFuKWWTbDs1yjcrhtyrVWBham4",
+  authDomain: "training-draft.firebaseapp.com",
+  projectId: "training-draft",
+  storageBucket: "training-draft.firebasestorage.app",
+  messagingSenderId: "1079116142765",
+  appId: "1:1079116142765:web:2fb0add63e32c88d6f4e24",
 };
