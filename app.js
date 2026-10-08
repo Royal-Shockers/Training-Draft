@@ -1,7 +1,7 @@
 import { TEAM_NAME } from "./config.js";
 import { createStore, LIVE, newId } from "./store.js";
 import { computeStats, validateMatch, winRate, pick, RESULTS, emptyRec } from "./stats.js";
-import { PROXY_READY, normTag, validTag, fetchPlayer, fetchBattles, forget } from "./bsapi.js";
+import { PROXY_READY, normTag, validTag, fetchPlayer, fetchBattles, fetchLadder, forget } from "./bsapi.js";
 import { readBattles, toSessions, aggregate, extreme, pretty } from "./bsstats.js";
 
 // ---------------- state ----------------
@@ -12,6 +12,8 @@ const state = {
   user: undefined,             // undefined = loading, null = signed out
   readError: "",
   section: "tracker",          // which part of the site; tabs below are scoped to it
+  ladder: null,                // { loading, error, season, total, updated, players, tiers }
+  ladderShown: 100,
   tab: "dashboard",
   sub: { team: "summary", enemy: "summary" },
   filter: { from: saved.from || "", to: saved.to || "", minGames: saved.minGames ?? 5 },
@@ -46,11 +48,12 @@ const today = () => {
 };
 
 // Top-level sections. Add a new one here plus its tabs, and the nav picks it up.
-const SECTIONS = [["tracker", "Match tracker"], ["players", "Player lookup"]];
+const SECTIONS = [["tracker", "Match tracker"], ["players", "Player lookup"], ["ladder", "Ranked ladder"]];
 const SECTION_TABS = {
   tracker: [["dashboard", "Dashboard"], ["log", "Log match"], ["matches", "Matches"],
     ["team", "Team"], ["enemy", "Enemy"], ["lists", "Lists"]],
   players: [],   // the Players view carries its own subtabs
+  ladder: [],
 };
 
 let names = { b: new Map(), map: new Map(), mode: new Map() };
@@ -377,8 +380,10 @@ function viewLists() {
 let profileSeq = 0;
 function loadProfile(raw) {
   const tag = normTag(raw);
+  // Validate before touching any state, so a bad tag leaves the page exactly as it was.
   if (!validTag(tag)) { toast("That doesn't look like a player tag. They look like #Y2PLQQCGP.", true); return; }
   const seq = ++profileSeq;
+  state.section = "players";
   state.profile = { tag, loading: true };
   state.pSub = "overview";
   render();
@@ -647,12 +652,84 @@ function viewPlayers() {
     ${views[sub](p)}`;
 }
 
+// ---------------- ranked ladder ----------------
+// The ladder is everyone the site has ever looked up who was Mythic I or above.
+// It fills as people search themselves, so it starts empty on a fresh database.
+function loadLadder(limit = 100) {
+  state.ladder = { loading: true };
+  render();
+  fetchLadder(limit).then(
+    d => { state.ladder = d; render(); },
+    e => { state.ladder = { error: e.message || String(e) }; render(); }
+  );
+}
+
+const TIER_CLASS = n => {
+  const t = String(n || "").toLowerCase();
+  return t.startsWith("pro") ? "t-pro" : t.startsWith("master") ? "t-master"
+    : t.startsWith("legendary") ? "t-legend" : t.startsWith("mythic") ? "t-mythic" : "t-other";
+};
+
+function viewLadder() {
+  if (!PROXY_READY) {
+    return `<div class="notice"><h2>The ladder isn't switched on yet</h2>
+      <p>It needs the stats worker from <code>worker/README.md</code>, plus its ladder database.</p></div>`;
+  }
+  const L = state.ladder;
+  if (L === null) { loadLadder(state.ladderShown); return `<p class="empty">Loading the ladder…</p>`; }
+  if (L.loading) return `<p class="empty">Loading the ladder…</p>`;
+  if (L.error) {
+    return `<div class="notice"><h2>Couldn't load the ladder</h2><p>${esc(L.error)}</p>
+      <p>If this says there's no database yet, the setup steps are in <code>worker/README.md</code>.</p></div>`;
+  }
+  const head = `<div class="bar"><h2>Ranked ladder</h2>
+      <button class="btn btn-ghost" data-act="reloadladder">Refresh</button></div>`;
+  if (!L.players.length) {
+    return head + `<div class="notice"><h2>Nobody on the ladder yet</h2>
+      <p>Players join by being looked up. Open <strong>Player lookup</strong>, search a tag, and anyone at
+        Mythic I or above is added here automatically.</p></div>`;
+  }
+  const big = L.tiers.reduce((a, t) => Math.max(a, t.n), 0) || 1;
+  const strip = `<div class="ladder-sum">
+      <span><strong>${num(L.total)}</strong> player${L.total === 1 ? "" : "s"} tracked</span>
+      <span>Season <strong>${esc(String(L.season || "—"))}</strong></span>
+      ${L.updated ? `<span>Last sync ${esc(whenShort(L.updated))}</span>` : ""}
+    </div>
+    <div class="dist">${L.tiers.map(t => `<div class="dist-row">
+        <span class="dist-name">${esc(title(t.rank_name))}</span>
+        <span class="dist-bar"><i class="${TIER_CLASS(t.rank_name)}" style="width:${(t.n / big) * 100}%"></i></span>
+        <span class="dist-n">${num(t.n)}</span>
+      </div>`).join("")}</div>`;
+
+  const rows = L.players.map((p, i) => `<tr>
+      <td class="num pos">${i + 1}</td>
+      <td><button class="link" data-act="loadtag" data-id="${esc(p.tag)}">${esc(p.name)}</button>
+        <span class="ptag small">#${esc(p.tag)}</span></td>
+      <td><span class="tier ${TIER_CLASS(p.rank_name)}">${esc(title(p.rank_name))}</span></td>
+      <td class="num"><strong>${num(p.elo)}</strong></td>
+      <td class="num">${p.best_elo ? num(p.best_elo) : ""}</td>
+      <td>${p.club ? esc(p.club) : ""}</td>
+      <td class="num muted">${esc(whenShort(p.updated))}</td>
+    </tr>`).join("");
+
+  return head + strip + `<p class="hint">Ranked by Elo straight from Supercell, so a player's place here matches what
+      they see in game. Only Mythic I and above are tracked. Tap a name to open their full profile.</p>
+    <div class="scroll"><table class="tbl plain"><thead><tr>
+      <th class="num">#</th><th>Player</th><th>Tier</th><th class="num">Elo</th>
+      <th class="num">Season best</th><th>Club</th><th class="num">Synced</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+    ${L.players.length < L.total
+      ? `<button class="btn btn-ghost more" data-act="moreladder">Show more (${num(L.total - L.players.length)} left)</button>`
+      : ""}`;
+}
+
 // ---------------- render ----------------
 function render() {
   renderTop();
   const el = main();
-  // Player lookup reads the live API, not your database, so it works before the lists load.
+  // These read the live API, not your database, so they work before the lists load.
   if (state.section === "players") { el.innerHTML = viewPlayers(); return; }
+  if (state.section === "ladder") { el.innerHTML = viewLadder(); return; }
   if (state.readError && !state.lists) {
     el.innerHTML = `<div class="notice"><h2>Sign in to see the stats</h2><p>${esc(state.readError)}</p>
       ${!state.user && LIVE ? `<button class="btn btn-gold" data-act="signin">Sign in with Google</button>` : ""}</div>`;
@@ -835,6 +912,8 @@ function onClick(e) {
       break;
     }
     case "loadtag": state.tagInput = "#" + normTag(id); loadProfile(id); break;
+    case "reloadladder": loadLadder(state.ladderShown); break;
+    case "moreladder": state.ladderShown += 100; loadLadder(state.ladderShown); break;
     case "refreshprofile": forget(state.profile.tag); loadProfile(state.profile.tag); break;
     case "savetag": {
       const pl = state.profile.player;

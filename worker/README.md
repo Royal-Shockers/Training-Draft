@@ -55,12 +55,33 @@ Commit and push. The Players tab appears on the site. The worker address is publ
 purpose — it holds no secret, only forwards lookups, and answers nothing but public profile
 data that anyone could read in the game.
 
+## 4. The ranked ladder database (optional)
+
+The Ranked ladder section needs somewhere to remember players. Without it the rest
+of the site works fine and the ladder says it isn't switched on.
+
+1. Cloudflare dashboard → **Storage & Databases → D1 SQL Database → Create**.
+   Name it `brawl-ladder`. Free tier, no card.
+2. Open it → **Console** tab → paste in the contents of `schema.sql` → **Execute**.
+3. Go back to your worker → **Settings → Bindings → Add → D1 database**.
+   - Variable name: **`DB`** (exactly this — the worker looks for `env.DB`)
+   - Database: `brawl-ladder`
+4. **Deploy**.
+
+Check it with `https://brawl-proxy.yourname.workers.dev/leaderboard` — you should get
+`{"season":0,"total":0,...}` on an empty ladder, not an error.
+
+How it fills: every profile looked up through the site is saved, if that player is
+**Mythic I or above**. Nobody is added any other way, so the ladder starts empty and
+grows as people search themselves. Each lookup overwrites that player's row, so the
+table holds their latest tier and Elo, not a history.
+
 ## What the worker does and doesn't do
 
-- Two routes: `/player/TAG` and `/battlelog/TAG`. Nothing else, and GET only.
+- Three routes: `/player/TAG`, `/battlelog/TAG` and `/leaderboard`. Nothing else, and GET only.
 - Rejects anything that isn't a real tag before spending a request.
 - Caches each reply for 60 seconds, so a whole team refreshing shares one lookup.
-- Never writes anything, and never touches your Firebase data.
+- Writes only to its own ladder database, and never touches your Firebase data.
 
 ## Limits worth knowing
 
