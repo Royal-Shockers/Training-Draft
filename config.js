@@ -1,4 +1,4 @@
-export const TEAM_NAME = "Royal Shockers";
+export const TEAM_NAME = "Training Draft";
 
 export const OWNER_EMAIL = "royalennyop@gmail.com";
 
