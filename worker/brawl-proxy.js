@@ -40,8 +40,12 @@ function cors(origin, allowed) {
   else if (origin && allowed.includes(origin)) h["Access-Control-Allow-Origin"] = origin;
   return h;
 }
+// no-store matters for the ladder: it changes every minute, and a browser holding on
+// to an old copy looks exactly like a crawler that has stopped working.
 const json = (body, status, headers) =>
-  new Response(JSON.stringify(body), { status, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
+  new Response(JSON.stringify(body), { status, headers: {
+    ...headers, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store",
+  } });
 function withHeaders(res, headers) {
   const out = new Response(res.body, res);
   for (const [k, v] of Object.entries(headers)) out.headers.set(k, v);
