@@ -185,20 +185,29 @@ async function refreshStalest(env, limit = REFRESH_BATCH) {
   return { refreshed, dropped, failed, looked: results.length };
 }
 
+// Tier families, for the filter pills. Ranks run Bronze I = 1 up to Pro = 22.
+const FAMILIES = { pro: [22, 99], masters: [19, 21], legendary: [16, 18], mythic: [13, 15] };
+
 // The ladder only shows the current season, since Elo resets when a season turns.
-async function ladder(db, limit, offset) {
+async function ladder(db, limit, offset, family) {
   const season = (await db.prepare(`SELECT MAX(season) AS s FROM players`).first()) || {};
-  const where = `WHERE season = ?1`;
+  const sid = season.s || 0;
+  const band = FAMILIES[family] || null;
+  // The pills always count the whole ladder; only the rows and total follow the filter.
+  const scope = band ? `WHERE season = ?1 AND rank BETWEEN ?4 AND ?5` : `WHERE season = ?1`;
+  const args = band ? [sid, limit, offset, band[0], band[1]] : [sid, limit, offset];
   const [rows, totals, tiers] = await Promise.all([
     db.prepare(`SELECT tag, name, elo, rank, rank_name, best_elo, club, trophies, updated
-                FROM players ${where} ORDER BY elo DESC, rank DESC, name ASC LIMIT ?2 OFFSET ?3`)
-      .bind(season.s || 0, limit, offset).all(),
-    db.prepare(`SELECT COUNT(*) AS n, MAX(updated) AS last FROM players ${where}`).bind(season.s || 0).first(),
-    db.prepare(`SELECT rank_name, rank, COUNT(*) AS n FROM players ${where}
-                GROUP BY rank_name, rank ORDER BY rank DESC`).bind(season.s || 0).all(),
+                FROM players ${scope} ORDER BY elo DESC, rank DESC, name ASC LIMIT ?2 OFFSET ?3`)
+      .bind(...args).all(),
+    db.prepare(`SELECT COUNT(*) AS n, MAX(updated) AS last FROM players ${scope}`)
+      .bind(...(band ? [sid, null, null, band[0], band[1]] : [sid])).first(),
+    db.prepare(`SELECT rank_name, rank, COUNT(*) AS n FROM players WHERE season = ?1
+                GROUP BY rank_name, rank ORDER BY rank DESC`).bind(sid).all(),
   ]);
   return {
-    season: season.s || 0,
+    season: sid,
+    family: family || "",
     total: (totals && totals.n) || 0,
     updated: (totals && totals.last) || 0,
     players: (rows && rows.results) || [],
@@ -235,7 +244,7 @@ export default {
       const limit = Math.min(200, Math.max(1, parseInt(url.searchParams.get("limit"), 10) || 100));
       const offset = Math.max(0, parseInt(url.searchParams.get("offset"), 10) || 0);
       try {
-        return json(await ladder(env.DB, limit, offset), 200, head);
+        return json(await ladder(env.DB, limit, offset, url.searchParams.get("tier") || ""), 200, head);
       } catch (e) {
         return json({ error: "Couldn't read the ladder. Has the players table been created?" }, 500, head);
       }
