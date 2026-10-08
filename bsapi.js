@@ -34,6 +34,8 @@ export const fetchBattles = tag => get(`battlelog/${tag}`).then(b => (b && b.ite
 export const fetchLadder = (limit = 100, offset = 0, tier = "") =>
   get(`leaderboard?limit=${limit}&offset=${offset}${tier ? `&tier=${encodeURIComponent(tier)}` : ""}`);
 
+export const fetchPingTargets = () => get("pingtargets");
+
 export function forget(tag) {
   cache.delete(`player/${tag}`);
   cache.delete(`battlelog/${tag}`);

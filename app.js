@@ -3,6 +3,9 @@ import { createStore, LIVE, newId } from "./store.js";
 import { computeStats, validateMatch, winRate, pick, RESULTS, emptyRec } from "./stats.js";
 import { PROXY_READY, normTag, validTag, fetchPlayer, fetchBattles, fetchLadder, forget } from "./bsapi.js";
 import { readBattles, toSessions, aggregate, extreme, pretty } from "./bsstats.js";
+import { fetchPingTargets } from "./bsapi.js";
+import { GROUPS, SERVERS, bandOf } from "./servers.js";
+import { measureAll } from "./ping.js";
 
 // ---------------- state ----------------
 const saved = (() => { try { return JSON.parse(localStorage.getItem("btt-ui")) || {}; } catch { return {}; } })();
@@ -15,6 +18,7 @@ const state = {
   ladder: null,                // { loading, error, season, total, updated, players, tiers }
   ladderShown: 100,
   ladderTier: "",              // "" = every tier, else pro/masters/legendary/mythic
+  ping: null,                  // { state: "idle"|"running"|"done"|"error", results, error }
   tab: "dashboard",
   sub: { team: "summary", enemy: "summary" },
   filter: { from: saved.from || "", to: saved.to || "", minGames: saved.minGames ?? 5 },
@@ -49,12 +53,14 @@ const today = () => {
 };
 
 // Top-level sections. Add a new one here plus its tabs, and the nav picks it up.
-const SECTIONS = [["tracker", "Match tracker"], ["players", "Player lookup"], ["ladder", "Ranked ladder"]];
+const SECTIONS = [["tracker", "Match tracker"], ["players", "Player lookup"], ["ladder", "Ranked ladder"],
+  ["ping", "Ping check"]];
 const SECTION_TABS = {
   tracker: [["dashboard", "Dashboard"], ["log", "Log match"], ["matches", "Matches"],
     ["team", "Team"], ["enemy", "Enemy"], ["lists", "Lists"]],
   players: [],   // the Players view carries its own subtabs
   ladder: [],
+  ping: [],
 };
 
 let names = { b: new Map(), map: new Map(), mode: new Map() };
@@ -731,6 +737,90 @@ function viewLadder() {
       Tap a name for their full profile. Season ${esc(String(L.season || "—"))}.</p>`;
 }
 
+// ---------------- ping check ----------------
+// Measures how far away each Brawl Stars server region is. See ping.js for why this
+// is a round-trip over HTTPS rather than a real ping.
+let pingRun = 0;
+
+async function runPing() {
+  const run = ++pingRun;
+  state.ping = { state: "running", results: {} };
+  render();
+  let endpoints;
+  try {
+    endpoints = await fetchPingTargets();
+  } catch (e) {
+    if (run !== pingRun) return;
+    state.ping = { state: "error", error: e.message || String(e) };
+    render();
+    return;
+  }
+  const targets = SERVERS
+    .map((s, i) => ({ key: i, url: s.gcp ? endpoints[s.gcp] : null }))
+    .filter(t => t.url);
+  // Rows with no endpoint are marked unmeasurable rather than left spinning forever.
+  for (let i = 0; i < SERVERS.length; i++) {
+    if (!SERVERS[i].gcp || !endpoints[SERVERS[i].gcp]) state.ping.results[i] = null;
+  }
+  await measureAll(targets, (key, ms) => {
+    if (run !== pingRun) return;
+    state.ping.results[key] = ms;
+    render();
+  }, () => run !== pingRun);
+  if (run !== pingRun) return;
+  state.ping.state = "done";
+  render();
+}
+
+function viewPing() {
+  if (!PROXY_READY) {
+    return `<div class="notice"><h2>The ping check isn't switched on yet</h2>
+      <p>It asks the stats worker where to measure to, so it needs the worker from <code>worker/README.md</code>.</p></div>`;
+  }
+  const P = state.ping;
+  if (P === null) { runPing(); return `<section class="pg"><p class="pg-note">Starting…</p></section>`; }
+  if (P.state === "error") {
+    return `<div class="notice"><h2>Couldn't run the ping check</h2><p>${esc(P.error)}</p></div>`;
+  }
+  const done = Object.keys(P.results).length;
+  const measured = Object.entries(P.results).filter(([, v]) => typeof v === "number");
+  const best = measured.sort((a, b) => a[1] - b[1])[0];
+
+  const rows = GROUPS.map(([id, label, colour]) => {
+    const list = SERVERS.map((s, i) => ({ s, i })).filter(({ s }) => s.group === id);
+    if (!list.length) return "";
+    return `<h3 class="pg-group">${esc(label)}</h3>
+      ${list.map(({ s, i }) => {
+        const ms = P.results[i];
+        const waiting = !(i in P.results);
+        const band = waiting ? "wait" : bandOf(ms);
+        return `<div class="pg-row${best && best[0] === String(i) ? " pg-best" : ""}">
+            <span class="pg-bar" style="background:${colour}"></span>
+            <span class="pg-label">${esc(id)} <em>|</em> ${esc(s.label)} <span class="pg-city">(${esc(s.city)}${s.flag})</span></span>
+            ${s.via ? `<span class="pg-via" title="No datacentre in ${esc(s.city)}; measured to ${esc(s.via)}">≈ ${esc(s.via)}</span>` : ""}
+            <span class="pg-ms">${waiting ? "…" : ms == null ? "—" : `${ms} ms`}</span>
+            <span class="pg-dot d-${band}"></span>
+          </div>`;
+      }).join("")}`;
+  }).join("");
+
+  return `<section class="pg">
+      <div class="pg-head">
+        <h2>Ping check</h2>
+        <p class="pg-sub">${P.state === "running"
+          ? `Measuring… ${done} of ${SERVERS.length}`
+          : best ? `Closest: <strong>${esc(SERVERS[+best[0]].city)}</strong> at ${best[1]} ms` : "No servers could be reached."}</p>
+        <button class="btn btn-gold" data-act="reping"${P.state === "running" ? " disabled" : ""}>
+          ${P.state === "running" ? "Measuring…" : "Test again"}</button>
+      </div>
+      ${rows}
+    </section>
+    <p class="hint">These are round trips to a datacentre in each server's city, measured from your browser.
+      A browser can't send a real ping, and Brawl Stars' game servers don't answer web requests, so treat
+      this as how far away each region is rather than the exact number the game would show. Rows marked
+      ≈ have no datacentre in that city and are measured to the nearest one.</p>`;
+}
+
 // ---------------- render ----------------
 function render() {
   renderTop();
@@ -738,6 +828,7 @@ function render() {
   // These read the live API, not your database, so they work before the lists load.
   if (state.section === "players") { el.innerHTML = viewPlayers(); return; }
   if (state.section === "ladder") { el.innerHTML = viewLadder(); return; }
+  if (state.section === "ping") { el.innerHTML = viewPing(); return; }
   if (state.readError && !state.lists) {
     el.innerHTML = `<div class="notice"><h2>Sign in to see the stats</h2><p>${esc(state.readError)}</p>
       ${!state.user && LIVE ? `<button class="btn btn-gold" data-act="signin">Sign in with Google</button>` : ""}</div>`;
@@ -924,6 +1015,7 @@ function onClick(e) {
     }
     case "loadtag": state.tagInput = "#" + normTag(id); loadProfile(id); break;
     case "reloadladder": loadLadder(state.ladderShown); break;
+    case "reping": runPing(); break;
     case "moreladder": state.ladderShown += 100; loadLadder(state.ladderShown); break;
     case "refreshprofile": forget(state.profile.tag); loadProfile(state.profile.tag); break;
     case "savetag": {
