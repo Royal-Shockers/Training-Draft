@@ -40,6 +40,13 @@ header { background: var(--ink); color: #fff; padding: max(14px, env(safe-area-i
 .controls input { border: 2px solid var(--line); border-radius: 8px; padding: 5px 8px; background: #fff; }
 #f-min { width: 70px; }
 #f-warn { color: var(--red); font-weight: 800; font-size: 13px; }
+/* top level: which part of the site you're in. Tabs below are scoped to the section. */
+#sections { max-width: 1200px; margin: 0 auto; padding: 0 0 12px; display: flex; gap: 8px; overflow-x: auto; }
+.sect { border: 0; background: transparent; color: #C9D2E6; font: 17px/1 var(--display); letter-spacing: .5px;
+  padding: 9px 16px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.sect:hover { color: #fff; background: rgba(255,255,255,.12); }
+.sect.on { background: var(--gold); color: var(--ink); }
+
 #tabs { max-width: 1200px; margin: 0 auto; padding: 0 20px 10px; display: flex; gap: 6px; overflow-x: auto; }
 .tab { border: 0; background: transparent; padding: 7px 14px; border-radius: 999px; font-weight: 800; cursor: pointer; white-space: nowrap; color: var(--muted); }
 .tab:hover { background: var(--paper); color: var(--ink); }
@@ -215,6 +222,7 @@ legend { font: 18px/1 var(--display); margin-bottom: 8px; }
     <h1 id="team-name">Team tracker</h1>
     <div id="auth"></div>
   </div>
+  <nav id="sections" aria-label="Sections"></nav>
   <div class="split" aria-hidden="true"></div>
 </header>
 <div class="demo" id="demo-banner" hidden>

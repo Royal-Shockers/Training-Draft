@@ -11,6 +11,7 @@ const state = {
   matches: [],
   user: undefined,             // undefined = loading, null = signed out
   readError: "",
+  section: "tracker",          // which part of the site; tabs below are scoped to it
   tab: "dashboard",
   sub: { team: "summary", enemy: "summary" },
   filter: { from: saved.from || "", to: saved.to || "", minGames: saved.minGames ?? 5 },
@@ -21,7 +22,6 @@ const state = {
   rowLimit: 300,
   form: null,
   editing: null,
-  members: null,
   players: [],                 // saved player tags, shared by the team
   profile: null,               // { tag, loading, error, player, battles }
   tagInput: "",
@@ -43,6 +43,14 @@ const isOwner = () => state.user && state.user.role === "owner";
 const today = () => {
   const d = new Date();
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+
+// Top-level sections. Add a new one here plus its tabs, and the nav picks it up.
+const SECTIONS = [["tracker", "Match tracker"], ["players", "Player lookup"]];
+const SECTION_TABS = {
+  tracker: [["dashboard", "Dashboard"], ["log", "Log match"], ["matches", "Matches"],
+    ["team", "Team"], ["enemy", "Enemy"], ["lists", "Lists"]],
+  players: [],   // the Players view carries its own subtabs
 };
 
 let names = { b: new Map(), map: new Map(), mode: new Map() };
@@ -94,15 +102,17 @@ function renderTop() {
   $("#auth").innerHTML = auth;
   $("#demo-banner").hidden = LIVE;
 
-  const tabs = [["dashboard", "Dashboard"], ["log", state.editing ? "Edit match" : "Log match"], ["matches", "Matches"],
-    ["players", "Players"], ["team", "Team"], ["enemy", "Enemy"], ["lists", "Lists"]];
-  if (isOwner() && LIVE) tabs.push(["members", "Teammates"]);
+  $("#sections").innerHTML = SECTIONS.map(([id, label]) =>
+    `<button class="sect${state.section === id ? " on" : ""}" data-section="${id}">${label}</button>`).join("");
+  const tabs = SECTION_TABS[state.section] || [];
+  $("#tabs").hidden = !tabs.length;
   $("#tabs").innerHTML = tabs.map(([id, label]) =>
-    `<button class="tab tab-${id}${state.tab === id ? " on" : ""}" data-tab="${id}">${label}</button>`).join("");
+    `<button class="tab tab-${id}${state.tab === id ? " on" : ""}" data-tab="${id}">${
+      id === "log" && state.editing ? "Edit match" : label}</button>`).join("");
 
   const f = state.filter;
-  // The date filters only apply to your own logged games, not to live API profiles.
-  $(".controls-in").hidden = state.tab === "players";
+  // The date filters only apply to the logged games, not to live API profiles.
+  $(".controls-in").hidden = state.section !== "tracker";
   $("#f-from").value = f.from; $("#f-to").value = f.to; $("#f-min").value = f.minGames;
   $("#f-warn").textContent = f.from && f.to && f.from > f.to ? "Start date is after the end date, so no games match." : "";
 }
@@ -353,7 +363,7 @@ function viewLists() {
       <h3>${title} <span class="count">${items.length}</span></h3>
       ${edit ? `<form class="addrow" data-form="add-${kind}"><input name="name" placeholder="New ${title.toLowerCase().replace(/s$/, "")}" maxlength="40" required aria-label="New name">${addExtra}<button class="btn btn-gold" type="submit">Add</button></form>` : ""}
       <ul class="items">${items.join("")}</ul></section>`;
-  return `<p class="hint">${edit ? "Rename anything by editing its name — every past game updates too. Items used in games can't be deleted." : "Sign in as a teammate to change the lists."}</p>
+  return `<p class="hint">${edit ? "Rename anything by editing its name — every past game updates too. Items used in games can't be deleted." : "Sign in to change the lists."}</p>
     <div class="panels">
       ${panel("brawlers", "Brawlers", [...L.brawlers].sort(byName).map(b => item("brawlers", b)))}
       ${panel("maps", "Maps", [...L.maps].sort(byName).map(m => item("maps", m,
@@ -361,20 +371,6 @@ function viewLists() {
         `<select name="mode" aria-label="Mode" required>${modeOpts("")}</select>`)}
       ${panel("modes", "Modes", [...L.modes].sort(byName).map(m => item("modes", m)))}
     </div>`;
-}
-
-function viewMembers() {
-  if (!isOwner()) return `<p class="empty">Only the owner can manage teammates.</p>`;
-  if (state.members === null) {
-    state.members = undefined;
-    run(async () => { state.members = await store.listMembers(); render(); });
-  }
-  const list = state.members || [];
-  return `<h2>Teammates</h2>
-    <p class="hint">People on this list can log games and edit the lists after signing in with Google. Everyone else can only look.</p>
-    <form class="addrow" data-form="add-member"><input name="email" type="email" placeholder="teammate@gmail.com" required aria-label="Email">
-      <button class="btn btn-gold" type="submit">Add teammate</button></form>
-    <ul class="items members">${list.map(e => `<li><span>${esc(e)}</span><button class="link danger" data-act="unmember" data-id="${esc(e)}">Remove</button></li>`).join("") || `<li class="empty">No teammates added yet.</li>`}</ul>`;
 }
 
 // ---------------- players: live profiles from the Brawl Stars API ----------------
@@ -655,8 +651,8 @@ function viewPlayers() {
 function render() {
   renderTop();
   const el = main();
-  // Players reads the live API, not your database, so it works before the lists load or sign-in.
-  if (state.tab === "players") { el.innerHTML = viewPlayers(); return; }
+  // Player lookup reads the live API, not your database, so it works before the lists load.
+  if (state.section === "players") { el.innerHTML = viewPlayers(); return; }
   if (state.readError && !state.lists) {
     el.innerHTML = `<div class="notice"><h2>Sign in to see the stats</h2><p>${esc(state.readError)}</p>
       ${!state.user && LIVE ? `<button class="btn btn-gold" data-act="signin">Sign in with Google</button>` : ""}</div>`;
@@ -665,15 +661,16 @@ function render() {
   if (state.lists === undefined) { el.innerHTML = `<p class="empty">Loading…</p>`; return; }
   if (state.lists === null) {
     el.innerHTML = `<div class="notice"><h2>Set up your lists</h2>
-      ${isOwner() ? `<p>Start with 91 brawlers, 26 maps and the 6 ranked modes. You can add, rename and remove them afterwards.</p>
+      ${canEdit() ? `<p>Start with 91 brawlers, 26 maps and the 6 ranked modes. You can add, rename and remove them afterwards.</p>
         <button class="btn btn-gold" data-act="seed">Load starter lists</button>`
-        : `<p>The owner needs to sign in once to set the site up.</p>${!state.user ? `<button class="btn btn-gold" data-act="signin">Sign in with Google</button>` : ""}`}</div>`;
+        : `<p>Someone on the team needs to sign in once to set this up.</p>
+           <button class="btn btn-gold" data-act="signin">Sign in with Google</button>`}</div>`;
     return;
   }
   const S = computeStats(state.matches, state.lists, state.filter);
   const views = {
-    dashboard: () => viewDashboard(S), log: viewLog, matches: () => viewMatches(S), players: viewPlayers,
-    team: () => viewSide("team", S), enemy: () => viewSide("enemy", S), lists: viewLists, members: viewMembers,
+    dashboard: () => viewDashboard(S), log: viewLog, matches: () => viewMatches(S),
+    team: () => viewSide("team", S), enemy: () => viewSide("enemy", S), lists: viewLists,
   };
   el.innerHTML = (views[state.tab] || views.dashboard)();
 }
@@ -777,9 +774,14 @@ function onClick(e) {
   if (t.dataset.tab) {
     if (state.tab === "log" && t.dataset.tab !== "log" && state.editing) { state.editing = null; state.form = null; }
     state.tab = t.dataset.tab; state.search = ""; state.rowLimit = 300; state.limit = 50;
-    if (state.tab === "members") state.members = null;
     window.scrollTo({ top: 0 });
     render(); return;
+  }
+  if (t.dataset.section) {
+    state.section = t.dataset.section;
+    const tabs = SECTION_TABS[state.section];
+    if (tabs.length && !tabs.some(([id]) => id === state.tab)) state.tab = tabs[0][0];
+    state.search = ""; window.scrollTo({ top: 0 }); render(); return;
   }
   if (t.dataset.psub) { state.pSub = t.dataset.psub; window.scrollTo({ top: 0 }); render(); return; }
   if (t.dataset.sub) {
@@ -845,11 +847,6 @@ function onClick(e) {
     }
     case "untag":
       run(() => store.savePlayers(list => list.filter(x => normTag(x.tag) !== normTag(id))), "Removed.");
-      break;
-    case "unmember":
-      if (confirm(`Remove ${id}? They'll no longer be able to log games.`)) {
-        run(async () => { await store.removeMember(id); state.members = await store.listMembers(); render(); }, "Teammate removed.");
-      }
       break;
   }
 }
@@ -917,11 +914,6 @@ function onSubmit(e) {
     return;
   }
   if (kind === "tag") { state.tagInput = form.tag.value; loadProfile(form.tag.value); return; }
-  if (kind === "add-member") {
-    const email = form.email.value.trim().toLowerCase();
-    run(async () => { await store.addMember(email); state.members = await store.listMembers(); render(); }, "Teammate added.");
-    return;
-  }
   const listKind = kind.replace("add-", "");
   const name = form.name.value;
   const mode = form.mode ? form.mode.value : "";
@@ -950,7 +942,7 @@ $("#f-clear").addEventListener("click", () => { state.filter = { ...state.filter
       lists: L => { state.lists = L; state.readError = ""; if (L) indexLists(); render(); },
       matches: ms => { state.matches = ms; render(); },
       players: ps => { state.players = ps; render(); },
-      user: u => { state.user = u; state.members = null; if (!isOwner() && state.tab === "members") state.tab = "dashboard"; render(); },
+      user: u => { state.user = u; render(); },
       error: msg => { state.readError = msg; render(); },
     });
   } catch (e) {
