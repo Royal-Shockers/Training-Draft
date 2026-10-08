@@ -401,6 +401,15 @@ function loadProfile(raw) {
 }
 
 const num = n => (typeof n === "number" ? n.toLocaleString() : "—");
+// The API shouts names and tiers ("SHELLY", "LEGENDARY III"). Anything already mixed-case
+// is left alone, so map names like "G.G. Mortuary" survive untouched.
+const title = s => {
+  const t = String(s || "");
+  if (/[a-z]/.test(t)) return t;
+  return t.toLowerCase()
+    .replace(/\b[a-z]/g, c => c.toUpperCase())
+    .replace(/\b(I{1,3}|IV|VI{0,3}|IX|XI{0,3})\b/gi, m => m.toUpperCase());
+};
 const whenShort = at => new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const trophyTxt = n => (n > 0 ? `+${n}` : n < 0 ? String(n) : "0");
 const resCell = b => (b.result
@@ -429,7 +438,7 @@ function battleTable(key, battles, opts = {}) {
     { id: "mode", label: "Mode", get: b => b.mode },
     { id: "map", label: "Map", get: b => b.map },
     { id: "brawler", label: "Brawler", get: b => b.brawler, fmt: b =>
-      `${esc(b.brawler) || "—"}${b.starPlayer ? ' <span class="star" title="Star player">★</span>' : ""}` },
+      `${esc(title(b.brawler)) || "—"}${b.starPlayer ? ' <span class="star" title="Star player">★</span>' : ""}` },
     { id: "res", label: "Result", get: b => ({ W: 2, D: 1, L: 0 }[b.result] ?? -1), fmt: resCell },
     { id: "tr", label: "Trophies", num: true, get: b => b.trophyChange, fmt: b => (b.trophyChange == null ? "" : trophyTxt(b.trophyChange)) },
   ];
@@ -438,9 +447,16 @@ function battleTable(key, battles, opts = {}) {
   return table(key, shown, battles, { defaultSort: { col: "at", dir: -1 }, empty: "No games here.", ...opts });
 }
 
+function rankTile(label, name, elo, side) {
+  return `<div class="tile ${side}">
+      <div class="tile-label">${label}</div>
+      <div class="tile-value">${name ? esc(title(name)) : "Unranked"}</div>
+      <div class="tile-sub">${elo ? `${num(elo)} Elo` : "No ranked games yet"}</div></div>`;
+}
+
 function recTable(key, map, label, empty) {
   const rows = [...map.values()];
-  const cols = [{ id: "name", label, get: r => r.name, fmt: r => `<strong>${esc(r.name)}</strong>` }, ...recCols(r => r.rec)];
+  const cols = [{ id: "name", label, get: r => r.name, fmt: r => `<strong>${esc(title(r.name))}</strong>` }, ...recCols(r => r.rec)];
   return table(key, cols, rows, { defaultSort: { col: "g", dir: -1 }, empty });
 }
 
@@ -452,12 +468,14 @@ function viewPlayerOverview(p) {
       <div class="tile-label">${label}</div><div class="tile-value">${value}</div>
       ${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
   return `<div class="tiles">
+      ${tile("Ranked", pl.rankedRankName ? esc(title(pl.rankedRankName)) : "Unranked",
+        pl.rankedElo ? `${num(pl.rankedElo)} Elo${pl.highestSeasonRankedElo ? ` · season best ${num(pl.highestSeasonRankedElo)}` : ""}` : "No ranked games this season")}
       ${tile("Trophies", num(pl.trophies), `Highest ${num(pl.highestTrophies)}`)}
-      ${tile("3v3 wins", num(pl["3vs3Victories"]))}
-      ${tile("Solo / Duo wins", `${num(pl.soloVictories)} / ${num(pl.duoVictories)}`)}
+      ${tile("Fame", pl.fameTierName ? esc(title(pl.fameTierName)) : "—", pl.fame ? `${num(pl.fame)} fame` : "")}
+      ${tile("3v3 wins", num(pl["3vs3Victories"]), `Solo ${num(pl.soloVictories)} · Duo ${num(pl.duoVictories)}`)}
       ${tile("Experience", `Level ${num(pl.expLevel)}`, `${num(pl.expPoints)} XP`)}
-      ${tile("Brawlers", num((pl.brawlers || []).length), "Tap the Brawlers tab for the full list")}
-      ${tile("Club", pl.club && pl.club.name ? esc(pl.club.name) : "No club", pl.club && pl.club.tag ? esc(pl.club.tag) : "")}
+      ${tile("Brawlers", num((pl.brawlers || []).length),
+        pl.totalPrestigeLevel ? `${num(pl.totalPrestigeLevel)} total prestige` : "Tap the Brawlers tab for the full list")}
     </div>
     <h2>Last ${p.battles.length} game${p.battles.length === 1 ? "" : "s"}</h2>
     <div class="tiles">
@@ -490,10 +508,16 @@ function viewPlayerSessions(p) {
 }
 
 function viewPlayerRanked(p) {
+  const pl = p.player;
   const ranked = p.battles.filter(b => b.ranked);
+  const tiles = `<div class="tiles">
+      ${rankTile("This season", pl.rankedRankName, pl.rankedElo, "blue")}
+      ${rankTile("Season best", pl.highestSeasonRankedRankName, pl.highestSeasonRankedElo, "blue")}
+      ${rankTile("All-time best", pl.highestAllTimeRankedRankName, pl.highestAllTimeRankedElo, "red")}
+    </div>`;
   if (!ranked.length) {
-    return `<p class="empty">No Ranked games in the last ${p.battles.length} battles. The API only keeps the most recent 25,
-      so ranked stats appear here once this player has played some.</p>`;
+    return tiles + `<p class="empty">No Ranked games in the last ${p.battles.length} battles, so there's nothing to break
+      down by map or brawler yet. The API only keeps the most recent 25 games.</p>`;
   }
   const a = aggregate(ranked);
   const wr = winRate(a.rec);
@@ -502,12 +526,12 @@ function viewPlayerRanked(p) {
       <div class="tile-label">${label}</div><div class="tile-value">${value}</div>
       ${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
   const brawlerTxt = x => `${pct(x.wr, 0)} · ${x.rec.g} game${x.rec.g === 1 ? "" : "s"}`;
-  return `<p class="hint">Worked out from the Ranked games in this player's battle log. Supercell's API doesn't give out
-      rank tiers, so there's no Bronze/Gold/Masters badge to show — no site has one.</p>
+  return tiles + `<p class="hint">Tiers and Elo come straight from the API. Everything below is worked out from the Ranked
+      games in this player's battle log, which only goes back 25 games.</p>
     <div class="tiles">
       ${tile("Ranked record", `${a.rec.w}–${a.rec.l}${a.rec.d ? `–${a.rec.d}` : ""}`, wr == null ? "" : `${pct(wr)} win rate`)}
-      ${tile("Best brawler", best ? esc(best.name) : "—", best ? brawlerTxt(best) : "Needs 2+ games on one brawler")}
-      ${tile("Worst brawler", worst ? esc(worst.name) : "—", worst ? brawlerTxt(worst) : "Needs 2+ games on one brawler", "red")}
+      ${tile("Best brawler", best ? esc(title(best.name)) : "—", best ? brawlerTxt(best) : "Needs 2+ games on one brawler")}
+      ${tile("Worst brawler", worst ? esc(title(worst.name)) : "—", worst ? brawlerTxt(worst) : "Needs 2+ games on one brawler", "red")}
     </div>
     <h2>Brawlers</h2>${recTable("p-rb", a.brawler, "Brawler", "No ranked games.")}
     <h2>Maps</h2>${recTable("p-rmap", a.map, "Map", "No ranked games.")}
@@ -528,17 +552,26 @@ function viewPlayerBrawlers(p) {
   const cols = [
     { id: "name", label: "Brawler", get: b => b.name, fmt: b =>
       `<span class="bwrap"><img class="bimg" src="https://cdn.brawlify.com/brawlers/borderless/${encodeURIComponent(b.id)}.png"
-        alt="" loading="lazy" onerror="this.remove()"><strong>${esc(b.name)}</strong></span>` },
+        alt="" loading="lazy" onerror="this.remove()"><strong>${esc(title(b.name))}</strong></span>` },
     { id: "power", label: "Power", num: true, get: b => b.power },
     { id: "rank", label: "Rank", num: true, get: b => b.rank },
+    { id: "prestige", label: "Prestige", num: true, get: b => b.prestigeLevel },
     { id: "trophies", label: "Trophies", num: true, get: b => b.trophies },
     { id: "highest", label: "Highest", num: true, get: b => b.highestTrophies },
+    { id: "streak", label: "Win streak", num: true, get: b => b.currentWinStreak,
+      fmt: b => `${b.currentWinStreak ?? 0}${b.maxWinStreak ? ` <span class="muted">/ ${b.maxWinStreak}</span>` : ""}` },
+    { id: "hc", label: "Hypercharge", get: b => ((b.hyperCharges || []).length ? 1 : 0),
+      fmt: b => ((b.hyperCharges || []).length ? esc(title(b.hyperCharges[0].name)) : "—") },
+    { id: "skin", label: "Skin", get: b => (b.skin && b.skin.name) || "",
+      fmt: b => (b.skin && b.skin.name ? esc(title(b.skin.name.replace(/\n/g, " "))) : "—") },
     { id: "gears", label: "Gears", get: b => (b.gears || []).length,
-      fmt: b => esc((b.gears || []).map(g => g.name).join(", ")) || "—" },
+      fmt: b => esc((b.gears || []).map(g => title(g.name)).join(", ")) || "—" },
     { id: "sp", label: "Star powers", num: true, get: b => (b.starPowers || []).length },
     { id: "gadgets", label: "Gadgets", num: true, get: b => (b.gadgets || []).length },
   ];
-  return `<p class="hint">${rows.length} brawler${rows.length === 1 ? "" : "s"} unlocked. Sort by any column.</p>
+  const maxed = rows.filter(b => (b.hyperCharges || []).length).length;
+  return `<p class="hint">${rows.length} brawler${rows.length === 1 ? "" : "s"} unlocked, ${maxed} with a hypercharge.
+      Win streak shows current / best. Sort by any column.</p>
     ${table("p-brawlers", cols, rows, { defaultSort: { col: "trophies", dir: -1 }, empty: "No brawlers in this profile." })}`;
 }
 
@@ -570,7 +603,12 @@ function viewPlayers() {
   if (p.error) return head + `<div class="notice"><h2>Couldn't load #${esc(p.tag)}</h2><p>${esc(p.error)}</p></div>`;
 
   const pl = p.player;
-  const color = /^0x[0-9a-fA-F]{8}$/.test(pl.nameColor || "") ? "#" + pl.nameColor.slice(-6) : "";
+  // The in-game name colour is picked for a dark background; skip it when it would wash out here.
+  let color = /^0x[0-9a-fA-F]{8}$/.test(pl.nameColor || "") ? "#" + pl.nameColor.slice(-6) : "";
+  if (color) {
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(color.slice(i, i + 2), 16));
+    if (0.299 * r + 0.587 * g + 0.114 * b > 190) color = "";
+  }
   const subs = [["overview", "Overview"], ["sessions", "Sessions"], ["ranked", "Ranked"], ["people", "Teammates & opponents"], ["brawlers", "Brawlers"]];
   const views = { overview: viewPlayerOverview, sessions: viewPlayerSessions, ranked: viewPlayerRanked, people: viewPlayerPeople, brawlers: viewPlayerBrawlers };
   const sub = views[state.pSub] ? state.pSub : "overview";

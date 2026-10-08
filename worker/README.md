@@ -66,7 +66,8 @@ data that anyone could read in the game.
 
 - **The battle log is the last 25 games, and that's all there is.** Supercell keeps no more.
   Your own Matches tab is what gives the team long-term history; this tab is a live snapshot.
-- **There is no rank tier in the API.** No Bronze/Gold/Masters badge is available to anyone,
-  Corestats included. Ranked games are tagged as such in the battle log, so win rates, maps
-  and brawler records are all computed from those games.
+- **Rank tier, Elo, fame and prestige do come from the API** (`rankedRankName`, `rankedElo`,
+  `fameTierName`, `totalPrestigeLevel`), along with each brawler's prestige, win streaks and
+  hypercharge. Everything else — ranked win rates, per-map and per-brawler records, sessions,
+  teammate and opponent records — is worked out here from the battle log.
 - Supercell's API goes down during game updates. The tab says so when that happens.

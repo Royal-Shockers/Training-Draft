@@ -14,4 +14,4 @@ export const firebaseConfig = {
 // Address of the Cloudflare Worker that holds the Brawl Stars API key, e.g.
 // "https://brawl-proxy.yourname.workers.dev". Leave empty until it is set up —
 // see worker/README.md. The Players tab turns on once this is filled in.
-export const PROXY_URL = "";
+export const PROXY_URL = "https://brawl-proxy.royalennyop.workers.dev";
