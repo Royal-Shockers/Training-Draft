@@ -14,6 +14,7 @@ const state = {
   section: "tracker",          // which part of the site; tabs below are scoped to it
   ladder: null,                // { loading, error, season, total, updated, players, tiers }
   ladderShown: 100,
+  ladderTier: "",              // "" = every tier, else pro/masters/legendary/mythic
   tab: "dashboard",
   sub: { team: "summary", enemy: "summary" },
   filter: { from: saved.from || "", to: saved.to || "", minGames: saved.minGames ?? 5 },
@@ -653,21 +654,22 @@ function viewPlayers() {
 }
 
 // ---------------- ranked ladder ----------------
-// The ladder is everyone the site has ever looked up who was Mythic I or above.
-// It fills as people search themselves, so it starts empty on a fresh database.
+// Everyone the crawler or a lookup has found at Legendary I or above, highest Elo first.
 function loadLadder(limit = 100) {
   state.ladder = { loading: true };
   render();
-  fetchLadder(limit).then(
+  fetchLadder(limit, 0, state.ladderTier).then(
     d => { state.ladder = d; render(); },
     e => { state.ladder = { error: e.message || String(e) }; render(); }
   );
 }
 
-const TIER_CLASS = n => {
-  const t = String(n || "").toLowerCase();
-  return t.startsWith("pro") ? "t-pro" : t.startsWith("master") ? "t-master"
-    : t.startsWith("legendary") ? "t-legend" : t.startsWith("mythic") ? "t-mythic" : "t-other";
+// Tier families, matching the worker's rank bands.
+const FAMILIES = [["pro", "Pro"], ["masters", "Masters"], ["legendary", "Legendary"], ["mythic", "Mythic"]];
+const familyOf = name => {
+  const t = String(name || "").toLowerCase();
+  return t.startsWith("pro") ? "pro" : t.startsWith("master") ? "masters"
+    : t.startsWith("legendary") ? "legendary" : t.startsWith("mythic") ? "mythic" : "other";
 };
 
 function viewLadder() {
@@ -677,50 +679,56 @@ function viewLadder() {
   }
   const L = state.ladder;
   if (L === null) { loadLadder(state.ladderShown); return `<p class="empty">Loading the ladder…</p>`; }
-  if (L.loading) return `<p class="empty">Loading the ladder…</p>`;
+  if (L.loading) return `<section class="lb"><p class="lb-empty">Loading the ladder…</p></section>`;
   if (L.error) {
     return `<div class="notice"><h2>Couldn't load the ladder</h2><p>${esc(L.error)}</p>
       <p>If this says there's no database yet, the setup steps are in <code>worker/README.md</code>.</p></div>`;
   }
-  const head = `<div class="bar"><h2>Ranked ladder</h2>
-      <button class="btn btn-ghost" data-act="reloadladder">Refresh</button></div>`;
-  if (!L.players.length) {
-    return head + `<div class="notice"><h2>Nobody on the ladder yet</h2>
-      <p>Players join by being looked up. Open <strong>Player lookup</strong>, search a tag, and anyone at
-        Mythic I or above is added here automatically.</p></div>`;
-  }
-  const big = L.tiers.reduce((a, t) => Math.max(a, t.n), 0) || 1;
-  const strip = `<div class="ladder-sum">
-      <span><strong>${num(L.total)}</strong> player${L.total === 1 ? "" : "s"} tracked</span>
-      <span>Season <strong>${esc(String(L.season || "—"))}</strong></span>
-      ${L.updated ? `<span>Last sync ${esc(whenShort(L.updated))}</span>` : ""}
-    </div>
-    <div class="dist">${L.tiers.map(t => `<div class="dist-row">
-        <span class="dist-name">${esc(title(t.rank_name))}</span>
-        <span class="dist-bar"><i class="${TIER_CLASS(t.rank_name)}" style="width:${(t.n / big) * 100}%"></i></span>
-        <span class="dist-n">${num(t.n)}</span>
-      </div>`).join("")}</div>`;
+
+  // Counts per family come from the whole ladder, so the pills don't change as you filter.
+  const counts = {};
+  for (const t of L.tiers) counts[familyOf(t.rank_name)] = (counts[familyOf(t.rank_name)] || 0) + t.n;
+  const all = Object.values(counts).reduce((a, n) => a + n, 0);
+  const pill = (id, label, n) => `<button class="lb-pill${state.ladderTier === id ? " on" : ""}" data-tier="${id}">
+      ${label}${n == null ? "" : ` <span>${num(n)}</span>`}</button>`;
 
   const rows = L.players.map((p, i) => `<tr>
-      <td class="num pos">${i + 1}</td>
-      <td><button class="link" data-act="loadtag" data-id="${esc(p.tag)}">${esc(p.name)}</button>
-        <span class="ptag small">#${esc(p.tag)}</span></td>
-      <td><span class="tier ${TIER_CLASS(p.rank_name)}">${esc(title(p.rank_name))}</span></td>
-      <td class="num"><strong>${num(p.elo)}</strong></td>
-      <td class="num">${p.best_elo ? num(p.best_elo) : ""}</td>
-      <td>${p.club ? esc(p.club) : ""}</td>
-      <td class="num muted">${esc(whenShort(p.updated))}</td>
+      <td class="lb-pos">${i + 1}</td>
+      <td class="lb-who">
+        <button class="lb-name" data-act="loadtag" data-id="${esc(p.tag)}">${esc(p.name)}</button>
+        <span class="lb-tag">#${esc(p.tag)}</span>
+        <div class="lb-tier f-${familyOf(p.rank_name)}">${esc(title(p.rank_name))}</div>
+      </td>
+      <td class="lb-elo"><span class="lb-badge f-${familyOf(p.rank_name)}">${num(p.elo)}</span></td>
+      <td class="lb-num">${p.best_elo ? num(p.best_elo) : "—"}</td>
+      <td class="lb-club">${p.club ? esc(p.club) : ""}</td>
     </tr>`).join("");
 
-  return head + strip + `<p class="hint">Ranked by Elo straight from Supercell, so a player's place here matches what
-      they see in game. Only Mythic I and above are tracked. Tap a name to open their full profile.</p>
-    <div class="scroll"><table class="tbl plain"><thead><tr>
-      <th class="num">#</th><th>Player</th><th>Tier</th><th class="num">Elo</th>
-      <th class="num">Season best</th><th>Club</th><th class="num">Synced</th>
-    </tr></thead><tbody>${rows}</tbody></table></div>
-    ${L.players.length < L.total
-      ? `<button class="btn btn-ghost more" data-act="moreladder">Show more (${num(L.total - L.players.length)} left)</button>`
-      : ""}`;
+  const body = L.players.length
+    ? `<table class="lb-table"><thead><tr>
+        <th class="lb-pos">#</th><th>Player</th><th class="lb-elo">Elo</th>
+        <th class="lb-num">Season best</th><th class="lb-club">Club</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+      ${L.players.length < L.total
+        ? `<button class="lb-more" data-act="moreladder">Show more (${num(L.total - L.players.length)} left)</button>` : ""}`
+    : `<p class="lb-empty">${all
+        ? "Nobody in this tier yet."
+        : "The ladder is still filling. The crawler works through the game's country rankings a country at a time."}</p>`;
+
+  return `<section class="lb">
+      <div class="lb-head">
+        <h2>Leaderboards</h2>
+        <p class="lb-sub">Global ladder · Legendary I and above · ranked by Elo${
+          L.updated ? ` · synced ${esc(whenShort(L.updated))}` : ""}</p>
+        <div class="lb-pills">
+          ${pill("", "🌍 All", all)}
+          ${FAMILIES.filter(([id]) => counts[id]).map(([id, label]) => pill(id, label, counts[id])).join("")}
+        </div>
+      </div>
+      ${body}
+    </section>
+    <p class="hint">Elo comes straight from Supercell, so a player's place here matches what they see in game.
+      Tap a name for their full profile. Season ${esc(String(L.season || "—"))}.</p>`;
 }
 
 // ---------------- render ----------------
@@ -859,6 +867,9 @@ function onClick(e) {
     const tabs = SECTION_TABS[state.section];
     if (tabs.length && !tabs.some(([id]) => id === state.tab)) state.tab = tabs[0][0];
     state.search = ""; window.scrollTo({ top: 0 }); render(); return;
+  }
+  if (t.dataset.tier !== undefined) {
+    state.ladderTier = t.dataset.tier; state.ladderShown = 100; loadLadder(100); return;
   }
   if (t.dataset.psub) { state.pSub = t.dataset.psub; window.scrollTo({ top: 0 }); render(); return; }
   if (t.dataset.sub) {

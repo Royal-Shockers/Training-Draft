@@ -14,3 +14,7 @@ ALLOWED_ORIGINS = "https://royal-shockers.github.io"
 # binding = "DB"
 # database_name = "brawl-ladder"
 # database_id = ""
+
+# Hourly ladder refresh (step 5). In the dashboard this is Settings -> Triggers.
+# [triggers]
+# crons = ["0 * * * *"]
