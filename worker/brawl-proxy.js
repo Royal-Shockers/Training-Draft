@@ -242,6 +242,38 @@ export default {
     const url = new URL(request.url);
     const [, kind, rawTag] = url.pathname.split("/");
 
+    // Where to measure latency to, for the ping check. GCPing runs a tiny service in
+    // every Google Cloud region for exactly this; the list is fetched here so the
+    // browser doesn't depend on that site's CORS headers, and cached for an hour.
+    if (kind === "pingtargets") {
+      const cache = caches.default;
+      const key = new Request("https://brawl-proxy.invalid/pingtargets");
+      const hit = await cache.match(key);
+      if (hit) return withHeaders(hit, { ...head, "X-Proxy-Cache": "hit" });
+      let out = {};
+      try {
+        const res = await fetch("https://global.gcping.com/api/endpoints", { headers: { Accept: "application/json" } });
+        if (res.ok) {
+          const raw = await res.json();
+          // The shape has moved around before, so take region/URL from either form.
+          const rows = Array.isArray(raw) ? raw : Object.values(raw || {});
+          for (const r of rows) {
+            const region = r && (r.Region || r.region);
+            const url = r && (r.URL || r.url);
+            if (region && url) out[region] = url;
+          }
+        }
+      } catch { /* fall through with whatever was collected */ }
+      if (!Object.keys(out).length) {
+        return json({ error: "Couldn't fetch the latency endpoints just now." }, 502, head);
+      }
+      const res = new Response(JSON.stringify(out), {
+        headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+      });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return withHeaders(res, head);
+    }
+
     // The ladder is read straight from storage, so it needs no API key.
     if (kind === "leaderboard") {
       if (!env.DB) return json({ error: "This worker has no ladder database attached yet." }, 503, head);
@@ -269,7 +301,7 @@ export default {
     }
 
     const build = paths[kind];
-    if (!build) return json({ error: "Unknown path. Use /player/TAG, /battlelog/TAG or /leaderboard." }, 404, head);
+    if (!build) return json({ error: "Unknown path. Use /player/TAG, /battlelog/TAG, /leaderboard or /pingtargets." }, 404, head);
     // People type O for zero; no tag contains the letter O, so swapping it is safe.
     const tag = decodeURIComponent(rawTag || "").replace(/^#/, "").toUpperCase().replace(/O/g, "0");
     if (!TAG.test(tag)) return json({ error: "That isn't a valid player tag." }, 400, head);

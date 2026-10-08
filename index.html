@@ -235,6 +235,41 @@ legend { font: 18px/1 var(--display); margin-bottom: 8px; }
   .lb-club { display: none; }
   .lb-table th.lb-club { display: none; }
 }
+/* ping check — rows in the style of the ping trackers, on a dark panel */
+.pg { --pg-bg: #1B1340; --pg-row: #241A52; --pg-line: #32266B; --pg-dim: #B4A8E8;
+  background: var(--pg-bg); color: #fff; border-radius: 16px; padding: 20px; border: 1px solid var(--pg-line); }
+.pg-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.pg-head h2 { font: 28px/1 var(--display); margin: 0; color: #fff; }
+.pg-sub { margin: 0; color: var(--pg-dim); font-size: 14px; flex: 1; min-width: 180px; }
+.pg-sub strong { color: #fff; }
+.pg-group { font: 15px/1 var(--display); color: var(--pg-dim); margin: 18px 0 8px; letter-spacing: .6px; }
+.pg-group:first-of-type { margin-top: 0; }
+.pg-row { display: flex; align-items: center; gap: 12px; background: var(--pg-row); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 8px; overflow: hidden; }
+.pg-best { outline: 2px solid var(--gold); }
+.pg-bar { width: 5px; align-self: stretch; border-radius: 3px; flex: none; margin: -2px 0; }
+.pg-label { font: 17px/1.2 var(--display); letter-spacing: .4px; flex: 1; min-width: 0; }
+.pg-label em { font-style: normal; color: var(--pg-dim); margin: 0 2px; }
+.pg-city { color: var(--pg-dim); }
+.pg-via { font-size: 12px; font-weight: 700; color: var(--pg-dim); background: rgba(255,255,255,.08);
+  padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.pg-ms { font: 17px/1 var(--display); min-width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+.pg-dot { width: 15px; height: 15px; border-radius: 50%; flex: none; }
+.d-good { background: #3FB950; box-shadow: 0 0 8px #3FB95099; }
+.d-ok { background: #FFD60A; box-shadow: 0 0 8px #FFD60A99; }
+.d-poor { background: #F0883E; box-shadow: 0 0 8px #F0883E99; }
+.d-bad { background: #E8364D; box-shadow: 0 0 8px #E8364D99; }
+.d-none { background: #4B3F7A; }
+.d-wait { background: #4B3F7A; animation: pgpulse 1s ease-in-out infinite; }
+@keyframes pgpulse { 50% { opacity: .35; } }
+.pg-note { color: var(--pg-dim); margin: 0; }
+@media (max-width: 560px) {
+  .pg { padding: 14px; }
+  .pg-label { font-size: 15px; }
+  .pg-city { display: block; font-size: 13px; }
+  .pg-via { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .d-wait { animation: none; } }
 .bwrap { display: inline-flex; align-items: center; gap: 7px; }
 .bimg { width: 28px; height: 28px; border-radius: 6px; background: var(--paper); object-fit: cover; }
 
