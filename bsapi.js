@@ -31,6 +31,7 @@ async function get(path) {
 
 export const fetchPlayer = tag => get(`player/${tag}`);
 export const fetchBattles = tag => get(`battlelog/${tag}`).then(b => (b && b.items) || []);
+export const fetchLadder = (limit = 100, offset = 0) => get(`leaderboard?limit=${limit}&offset=${offset}`);
 
 export function forget(tag) {
   cache.delete(`player/${tag}`);

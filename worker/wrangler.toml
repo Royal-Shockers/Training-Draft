@@ -7,3 +7,10 @@ compatibility_date = "2024-11-01"
 
 [vars]
 ALLOWED_ORIGINS = "https://royal-shockers.github.io"
+
+# The ranked ladder storage; create it with `npx wrangler d1 create brawl-ladder`
+# and paste the returned database_id here.
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "brawl-ladder"
+# database_id = ""
