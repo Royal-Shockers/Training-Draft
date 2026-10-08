@@ -141,6 +141,12 @@ async function createFirebaseStore(h) {
         if (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request") return;
         if (e.code === "auth/unauthorized-domain") throw new Error("This web address isn't on Firebase's Authorized domains list yet (README step 7).");
         if (e.code === "auth/popup-blocked") throw new Error("Your browser blocked the sign-in window. Allow pop-ups for this site and try again.");
+        // Opening the site from inside another app (Discord, Instagram, Messages) gives a
+        // cut-down browser that blocks the storage Google sign-in needs.
+        if (e.code === "auth/web-storage-unsupported" || e.code === "auth/operation-not-supported-in-this-environment"
+          || /missing initial state|sessionStorage/i.test(e.message || "")) {
+          throw new Error("Sign-in doesn't work in an app's built-in browser. Tap the ⋯ or share button and choose Open in Safari or Open in Chrome, then sign in there. You can read everything without signing in.");
+        }
         throw e;
       }
     },

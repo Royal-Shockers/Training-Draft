@@ -1,0 +1,58 @@
+// Firestore security rules for the team tracker.
+//
+// Paste these into the Firebase console: Firestore Database -> Rules -> replace
+// everything -> Publish. They take effect in under a minute.
+//
+// What they do: anyone with the link can READ the stats, so teammates never have to
+// sign in just to look — which also sidesteps Google sign-in failing inside app
+// built-in browsers. Only the owner and people on the Teammates page can CHANGE
+// anything. Teammate email addresses stay private.
+//
+// Note this makes your match data public to anyone who knows the site address.
+// It is read-only to them, and holds nothing but brawler picks, maps and results.
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function email() {
+      return request.auth.token.email.lower();
+    }
+    function isOwner() {
+      return signedIn() && email() == 'royalennyop@gmail.com';
+    }
+    function isMember() {
+      return signedIn() && exists(/databases/$(database)/documents/members/$(email()));
+    }
+    function canEdit() {
+      return isOwner() || isMember();
+    }
+
+    // Brawler/map/mode lists, and the saved player tags for the Players tab.
+    match /config/{doc} {
+      allow read: if true;
+      allow write: if canEdit();
+    }
+
+    // Logged games, one document per month.
+    match /buckets/{month} {
+      allow read: if true;
+      allow write: if canEdit();
+    }
+
+    // Who is allowed to edit. Kept private so the team's emails aren't public.
+    match /members/{teammate} {
+      allow read: if canEdit();
+      allow write: if isOwner();
+    }
+
+    // Anything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
