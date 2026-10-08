@@ -686,8 +686,8 @@ function viewLadder() {
       <button class="btn btn-ghost" data-act="reloadladder">Refresh</button></div>`;
   if (!L.players.length) {
     return head + `<div class="notice"><h2>Nobody on the ladder yet</h2>
-      <p>Players join by being looked up. Open <strong>Player lookup</strong>, search a tag, and anyone at
-        Mythic I or above is added here automatically.</p></div>`;
+      <p>The crawler fills this from the game's country rankings, a country at a time, keeping everyone at
+        Masters II or above. Looking a tag up in <strong>Player lookup</strong> adds them straight away.</p></div>`;
   }
   const big = L.tiers.reduce((a, t) => Math.max(a, t.n), 0) || 1;
   const strip = `<div class="ladder-sum">
@@ -713,7 +713,7 @@ function viewLadder() {
     </tr>`).join("");
 
   return head + strip + `<p class="hint">Ranked by Elo straight from Supercell, so a player's place here matches what
-      they see in game. Only Mythic I and above are tracked. Tap a name to open their full profile.</p>
+      they see in game. Only Masters II and above are listed. Tap a name to open their full profile.</p>
     <div class="scroll"><table class="tbl plain"><thead><tr>
       <th class="num">#</th><th>Player</th><th>Tier</th><th class="num">Elo</th>
       <th class="num">Season best</th><th>Club</th><th class="num">Synced</th>

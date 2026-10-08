@@ -71,9 +71,9 @@ of the site works fine and the ladder says it isn't switched on.
 Check it with `https://brawl-proxy.yourname.workers.dev/leaderboard` — you should get
 `{"season":0,"total":0,...}` on an empty ladder, not an error.
 
-How it fills: every profile looked up through the site is saved, if that player is
-**Mythic I or above**. Nobody is added any other way, so the ladder starts empty and
-grows as people search themselves. Each lookup overwrites that player's row, so the
+How it fills: anyone looked up through the site is saved if they are **Masters II or
+above**, and the cron job (step 5) crawls the game's own country rankings to find
+players nobody has searched for. Each lookup overwrites that player's row, so the
 table holds their latest tier and Elo, not a history.
 
 ## 5. Keep the ladder fresh (optional, needs step 4)
@@ -84,14 +84,22 @@ A cron trigger re-syncs the least recently seen players automatically.
 1. Your worker → **Settings → Triggers → Cron Triggers → Add**.
 2. Schedule: `0 * * * *` (every hour, on the hour). **Add**, then **Deploy**.
 
-Each run refreshes the 20 stalest players — about 480 a day, which keeps a small
-ladder current without troubling the API's rate limit. If the ladder grows past a
-few hundred players, run it more often (`*/15 * * * *`) or raise `REFRESH_BATCH`
-in the worker.
+Each run does up to 20 lookups: it takes one country's trophy top 200 into a queue,
+then works through the queue, keeping everyone at Masters II or above. Once the
+queue is empty it re-syncs the stalest players already on the ladder instead.
 
-What a refresh does per player: still Mythic I or above → row updated; dropped
-below → removed from the ladder; tag no longer exists → removed. A failing or
-unreachable API leaves the row untouched, so an outage never empties the ladder.
+Supercell has no "list every ranked player" endpoint, so the country rankings are
+the only way to find players nobody has searched for. That means the ladder covers
+the top 200 by trophies in each country — a Masters II player outside their
+country's trophy top 200 won't be found this way.
+
+Hourly is slow for this: ~480 lookups a day against roughly 40,000 seed tags. Use
+`*/5 * * * *` or `* * * * *` to fill it in days rather than months. At one run a
+minute it is about 29,000 lookups a day, inside Cloudflare's free tier.
+
+Per player: still Masters II or above → row updated; dropped below, or a tag that
+no longer exists → removed from the ladder. A failing or unreachable API leaves
+both the row and the queue entry alone, so an outage never empties the ladder.
 
 **To test it without waiting for the hour**, add a **Secret** named `REFRESH_KEY`
 with any value you choose, then open
