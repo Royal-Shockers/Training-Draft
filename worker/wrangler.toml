@@ -1,0 +1,9 @@
+# Only needed if you deploy from a terminal instead of Cloudflare's dashboard:
+#   npx wrangler deploy
+#   npx wrangler secret put BRAWL_API_KEY
+name = "brawl-proxy"
+main = "brawl-proxy.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://royal-shockers.github.io"
