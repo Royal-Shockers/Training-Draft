@@ -76,9 +76,33 @@ How it fills: every profile looked up through the site is saved, if that player 
 grows as people search themselves. Each lookup overwrites that player's row, so the
 table holds their latest tier and Elo, not a history.
 
+## 5. Keep the ladder fresh (optional, needs step 4)
+
+A player's row only changes when someone looks them up, so Elo drifts out of date.
+A cron trigger re-syncs the least recently seen players automatically.
+
+1. Your worker → **Settings → Triggers → Cron Triggers → Add**.
+2. Schedule: `0 * * * *` (every hour, on the hour). **Add**, then **Deploy**.
+
+Each run refreshes the 20 stalest players — about 480 a day, which keeps a small
+ladder current without troubling the API's rate limit. If the ladder grows past a
+few hundred players, run it more often (`*/15 * * * *`) or raise `REFRESH_BATCH`
+in the worker.
+
+What a refresh does per player: still Mythic I or above → row updated; dropped
+below → removed from the ladder; tag no longer exists → removed. A failing or
+unreachable API leaves the row untouched, so an outage never empties the ladder.
+
+**To test it without waiting for the hour**, add a **Secret** named `REFRESH_KEY`
+with any value you choose, then open
+`https://brawl-proxy.yourname.workers.dev/refresh?key=YOURVALUE`. It runs the same
+job and reports what it did. Without that secret the route doesn't exist, so nobody
+else can trigger it.
+
 ## What the worker does and doesn't do
 
-- Three routes: `/player/TAG`, `/battlelog/TAG` and `/leaderboard`. Nothing else, and GET only.
+- Three public routes: `/player/TAG`, `/battlelog/TAG` and `/leaderboard`, GET only.
+  `/refresh` exists only when you set a `REFRESH_KEY` secret.
 - Rejects anything that isn't a real tag before spending a request.
 - Caches each reply for 60 seconds, so a whole team refreshing shares one lookup.
 - Writes only to its own ladder database, and never touches your Firebase data.

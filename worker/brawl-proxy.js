@@ -61,6 +61,42 @@ async function remember(db, p) {
   } catch { /* the ladder is a nicety; never fail a lookup over it */ }
 }
 
+// Rows only change when someone looks that player up, so Elo goes stale. The cron
+// trigger re-syncs the least recently seen players, oldest first, a batch at a time.
+const REFRESH_BATCH = 20;   // kept small: each one is a subrequest, and the key has a rate limit
+const REFRESH_LANES = 5;
+
+async function refreshStalest(env, limit = REFRESH_BATCH) {
+  const { results = [] } = await env.DB.prepare(
+    `SELECT tag FROM players ORDER BY updated ASC LIMIT ?1`).bind(limit).all();
+  const drop = tag => env.DB.prepare(`DELETE FROM players WHERE tag = ?1`).bind(tag).run();
+  let refreshed = 0, dropped = 0, failed = 0;
+
+  for (let i = 0; i < results.length; i += REFRESH_LANES) {
+    await Promise.all(results.slice(i, i + REFRESH_LANES).map(async ({ tag }) => {
+      let res;
+      try {
+        res = await fetch(API + paths.player(tag), {
+          headers: { Authorization: `Bearer ${env.BRAWL_API_KEY}`, Accept: "application/json" },
+        });
+      } catch { failed++; return; }
+      // A tag that no longer exists is gone for good; anything else may be temporary.
+      if (res.status === 404) { await drop(tag); dropped++; return; }
+      if (!res.ok) { failed++; return; }
+      let p;
+      try { p = await res.json(); } catch { failed++; return; }
+      if (typeof p.rankedRank === "number" && p.rankedRank >= MYTHIC_I) {
+        await remember(env.DB, p);
+        refreshed++;
+      } else {
+        await drop(tag);   // fell below Mythic I, so off the ladder
+        dropped++;
+      }
+    }));
+  }
+  return { refreshed, dropped, failed, looked: results.length };
+}
+
 // The ladder only shows the current season, since Elo resets when a season turns.
 async function ladder(db, limit, offset) {
   const season = (await db.prepare(`SELECT MAX(season) AS s FROM players`).first()) || {};
@@ -83,6 +119,15 @@ async function ladder(db, limit, offset) {
 }
 
 export default {
+  // Wired to a cron trigger in the dashboard; see worker/README.md step 5.
+  async scheduled(event, env, ctx) {
+    if (!env.DB || !env.BRAWL_API_KEY) return;
+    ctx.waitUntil(refreshStalest(env).then(
+      r => console.log("ladder refresh", JSON.stringify(r)),
+      e => console.log("ladder refresh failed", e && e.message)
+    ));
+  },
+
   async fetch(request, env, ctx) {
     const allowed = (env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
     const origin = request.headers.get("Origin") || "";
@@ -111,6 +156,17 @@ export default {
     if (!env.BRAWL_API_KEY) {
       return json({ error: "This worker has no API key saved yet (add the BRAWL_API_KEY secret)." }, 500, head);
     }
+
+    // Runs the same refresh the cron does. Only exists if a REFRESH_KEY secret is set,
+    // so nobody can burn the API rate limit by hitting a public URL.
+    if (kind === "refresh") {
+      if (!env.REFRESH_KEY || url.searchParams.get("key") !== env.REFRESH_KEY) {
+        return json({ error: "Unknown path. Use /player/TAG, /battlelog/TAG or /leaderboard." }, 404, head);
+      }
+      if (!env.DB) return json({ error: "This worker has no ladder database attached yet." }, 503, head);
+      return json(await refreshStalest(env), 200, head);
+    }
+
     const build = paths[kind];
     if (!build) return json({ error: "Unknown path. Use /player/TAG, /battlelog/TAG or /leaderboard." }, 404, head);
     // People type O for zero; no tag contains the letter O, so swapping it is safe.
