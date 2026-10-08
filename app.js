@@ -507,6 +507,30 @@ function viewPlayerSessions(p) {
     }).join("")}`;
 }
 
+// Shared body for the Ranked and Friendlies views: a record, the best and worst brawler,
+// then the same per-brawler, per-map and per-mode breakdown.
+function breakdown(key, battles, noun) {
+  const a = aggregate(battles);
+  const wr = winRate(a.rec);
+  const best = extreme(a.brawler, "best");
+  // With only one brawler over the games threshold, best and worst are the same pick — show neither twice.
+  let worst = extreme(a.brawler, "worst");
+  if (best && worst && best.key === worst.key) worst = null;
+  const tile = (label, value, sub = "", side = "blue") => `<div class="tile ${side}">
+      <div class="tile-label">${label}</div><div class="tile-value">${value}</div>
+      ${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
+  const brawlerTxt = x => `${pct(x.wr, 0)} · ${x.rec.g} game${x.rec.g === 1 ? "" : "s"}`;
+  const none = `No ${noun} games.`;
+  return { a, html: `<div class="tiles">
+      ${tile("Record", `${a.rec.w}–${a.rec.l}${a.rec.d ? `–${a.rec.d}` : ""}`, wr == null ? "" : `${pct(wr)} win rate`)}
+      ${tile("Best brawler", best ? esc(title(best.name)) : "—", best ? brawlerTxt(best) : "Needs 2+ games on one brawler")}
+      ${tile("Worst brawler", worst ? esc(title(worst.name)) : "—", worst ? brawlerTxt(worst) : "Needs 2+ games on a second brawler", "red")}
+    </div>
+    <h2>Brawlers</h2>${recTable(key + "-b", a.brawler, "Brawler", none)}
+    <h2>Maps</h2>${recTable(key + "-map", a.map, "Map", none)}
+    <h2>Modes</h2>${recTable(key + "-mode", a.mode, "Mode", none)}` };
+}
+
 function viewPlayerRanked(p) {
   const pl = p.player;
   const ranked = p.battles.filter(b => b.ranked);
@@ -519,24 +543,27 @@ function viewPlayerRanked(p) {
     return tiles + `<p class="empty">No Ranked games in the last ${p.battles.length} battles, so there's nothing to break
       down by map or brawler yet. The API only keeps the most recent 25 games.</p>`;
   }
-  const a = aggregate(ranked);
-  const wr = winRate(a.rec);
-  const best = extreme(a.brawler, "best"), worst = extreme(a.brawler, "worst");
-  const tile = (label, value, sub = "", side = "blue") => `<div class="tile ${side}">
-      <div class="tile-label">${label}</div><div class="tile-value">${value}</div>
-      ${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
-  const brawlerTxt = x => `${pct(x.wr, 0)} · ${x.rec.g} game${x.rec.g === 1 ? "" : "s"}`;
   return tiles + `<p class="hint">Tiers and Elo come straight from the API. Everything below is worked out from the Ranked
       games in this player's battle log, which only goes back 25 games.</p>
-    <div class="tiles">
-      ${tile("Ranked record", `${a.rec.w}–${a.rec.l}${a.rec.d ? `–${a.rec.d}` : ""}`, wr == null ? "" : `${pct(wr)} win rate`)}
-      ${tile("Best brawler", best ? esc(title(best.name)) : "—", best ? brawlerTxt(best) : "Needs 2+ games on one brawler")}
-      ${tile("Worst brawler", worst ? esc(title(worst.name)) : "—", worst ? brawlerTxt(worst) : "Needs 2+ games on one brawler", "red")}
-    </div>
-    <h2>Brawlers</h2>${recTable("p-rb", a.brawler, "Brawler", "No ranked games.")}
-    <h2>Maps</h2>${recTable("p-rmap", a.map, "Map", "No ranked games.")}
-    <h2>Modes</h2>${recTable("p-rmode", a.mode, "Mode", "No ranked games.")}
+    ${breakdown("p-r", ranked, "ranked").html}
     <h2>Every ranked game</h2>${battleTable("p-ranked", ranked)}`;
+}
+
+function viewPlayerFriendlies(p) {
+  const friendly = p.battles.filter(b => b.friendly);
+  if (!friendly.length) {
+    return `<p class="empty">No friendly games in the last ${p.battles.length} battles. Scrims show up here once they're
+      the most recent thing this player has played — the API only keeps 25 games, so ladder and ranked push them out.</p>`;
+  }
+  const { a, html } = breakdown("p-f", friendly, "friendly");
+  return `<p class="hint">Scrims and club friendlies. These earn no trophies and no ranked progress, so the game itself
+      keeps no record of them — this is worked out from the last ${p.battles.length} battles, of which
+      ${friendly.length} ${friendly.length === 1 ? "was" : "were"} friendly. For scrim history that lasts,
+      log games on the Matches tab.</p>
+    ${html}
+    <h2>Played with</h2>${recTable("p-fmates", a.mates, "Teammate", "No teammates in these games.")}
+    <h2>Played against</h2>${recTable("p-ffoes", a.foes, "Opponent", "No opponents in these games.")}
+    <h2>Every friendly game</h2>${battleTable("p-friendly", friendly)}`;
 }
 
 function viewPlayerPeople(p) {
@@ -609,8 +636,10 @@ function viewPlayers() {
     const [r, g, b] = [1, 3, 5].map(i => parseInt(color.slice(i, i + 2), 16));
     if (0.299 * r + 0.587 * g + 0.114 * b > 190) color = "";
   }
-  const subs = [["overview", "Overview"], ["sessions", "Sessions"], ["ranked", "Ranked"], ["people", "Teammates & opponents"], ["brawlers", "Brawlers"]];
-  const views = { overview: viewPlayerOverview, sessions: viewPlayerSessions, ranked: viewPlayerRanked, people: viewPlayerPeople, brawlers: viewPlayerBrawlers };
+  const subs = [["overview", "Overview"], ["sessions", "Sessions"], ["ranked", "Ranked"], ["friendlies", "Friendlies"],
+    ["people", "Teammates & opponents"], ["brawlers", "Brawlers"]];
+  const views = { overview: viewPlayerOverview, sessions: viewPlayerSessions, ranked: viewPlayerRanked,
+    friendlies: viewPlayerFriendlies, people: viewPlayerPeople, brawlers: viewPlayerBrawlers };
   const sub = views[state.pSub] ? state.pSub : "overview";
   return head + `<section class="phead">
       <h2 ${color ? `style="color:${esc(color)}"` : ""}>${esc(pl.name || "")}</h2>

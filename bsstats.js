@@ -67,6 +67,7 @@ function readBattle(item, meTag) {
     at: parseTime(item.battleTime),
     type,
     ranked: RANKED.has(type),
+    friendly: type === "friendly", // scrims and club friendlies; no trophies, no ranked progress
     mode: pretty(b.mode || ev.mode),
     map: ev.map || "",
     result,
