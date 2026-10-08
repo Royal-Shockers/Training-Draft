@@ -70,9 +70,6 @@ function createDemoStore(h) {
     async addMatches(ms) { for (const m of ms) data.matches.push({ ...clean(m), id: m.id || newId() }); save(); emit(); },
     async updateMatch(old, m) { data.matches = data.matches.map(x => (x.id === old.id ? { ...clean(m), id: old.id } : x)); save(); emit(); },
     async deleteMatch(m) { data.matches = data.matches.filter(x => x.id !== m.id); save(); emit(); },
-    async listMembers() { return []; },
-    async addMember() { throw new Error("Teammates can be added once the site is connected to Firebase."); },
-    async removeMember() {},
     resetDemo() { try { localStorage.removeItem(KEY); } catch { /* ignore */ } location.reload(); },
   };
 }
@@ -82,8 +79,8 @@ function friendly(e, email) {
   const code = (e && e.code) || "";
   if (code.includes("permission-denied")) {
     return email
-      ? `${email} isn't allowed to make changes. Ask the owner to add you on the Teammates page.`
-      : "Sign in with a team account to do that.";
+      ? `${email} isn't allowed to make that change.`
+      : "Sign in with Google to do that.";
   }
   if (code.includes("unavailable")) return "Can't reach the database. Check your internet connection.";
   return (e && e.message) || "Something went wrong.";
@@ -121,11 +118,8 @@ async function createFirebaseStore(h) {
   A.onAuthStateChanged(auth, async u => {
     email = u ? (u.email || "").toLowerCase() : "";
     if (!u) { h.user(null); listen(); return; }
-    let role = "viewer";
-    if (email === OWNER_EMAIL.trim().toLowerCase()) role = "owner";
-    else {
-      try { if ((await F.getDoc(F.doc(db, "members", email))).exists()) role = "member"; } catch { /* stays viewer */ }
-    }
+    // Anyone signed in can log games; "owner" is only a label on the person who set the site up.
+    const role = email === OWNER_EMAIL.trim().toLowerCase() ? "owner" : "member";
     h.user({ email, name: u.displayName || email, role });
     listen(); // listen again so a private database opens up after signing in
   });
@@ -185,9 +179,6 @@ async function createFirebaseStore(h) {
       await batch.commit();
     }),
     deleteMatch: m => guard(() => F.updateDoc(F.doc(db, "buckets", bucketOf(m.date)), { ["m." + m.id]: F.deleteField() })),
-    listMembers: () => guard(async () => (await F.getDocs(F.collection(db, "members"))).docs.map(d => d.id).sort()),
-    addMember: e => guard(() => F.setDoc(F.doc(db, "members", e.trim().toLowerCase()), { addedAt: Date.now() })),
-    removeMember: e => guard(() => F.deleteDoc(F.doc(db, "members", e))),
     resetDemo() {},
   };
 }
