@@ -1,7 +1,7 @@
 -- Ladder storage for the Ranked ladder section.
 -- Run this once against your D1 database (see worker/README.md).
 --
--- One row per player the crawler or a lookup has found, at Masters II or above. The row is
+-- One row per player the crawler or a lookup has found, at Legendary I or above. The row is
 -- overwritten each time that player is looked up again, so it always holds their
 -- latest tier and Elo rather than a history.
 
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS players (
   tag            TEXT PRIMARY KEY,   -- without the leading #
   name           TEXT NOT NULL,
   elo            INTEGER NOT NULL,   -- rankedElo: what the ladder sorts on
-  rank           INTEGER NOT NULL,   -- rankedRank, 13 = Mythic I
+  rank           INTEGER NOT NULL,   -- rankedRank, 16 = Legendary I
   rank_name      TEXT NOT NULL,      -- e.g. LEGENDARY III
   best_elo       INTEGER,            -- highest this season
   best_rank_name TEXT,

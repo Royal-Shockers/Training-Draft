@@ -3,8 +3,8 @@
 // Setup steps are in worker/README.md.
 
 // Ranked tiers are numbered from Bronze I = 1 (Bronze/Silver/Gold/Diamond/Mythic/
-// Legendary are 3 steps each, then Masters I-III, then Pro). Masters II is 20.
-const MIN_RANK = 20;
+// Legendary are 3 steps each, then Masters I-III, then Pro). Legendary I is 16.
+const MIN_RANK = 16;
 
 // Seeds for the crawler. Supercell has no "list every ranked player" endpoint, so the
 // only way to find players is the trophy rankings: the top 200 of each country.

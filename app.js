@@ -654,7 +654,7 @@ function viewPlayers() {
 }
 
 // ---------------- ranked ladder ----------------
-// Everyone the crawler or a lookup has found at Masters II or above, highest Elo first.
+// Everyone the crawler or a lookup has found at Legendary I or above, highest Elo first.
 function loadLadder(limit = 100) {
   state.ladder = { loading: true };
   render();
@@ -718,7 +718,7 @@ function viewLadder() {
   return `<section class="lb">
       <div class="lb-head">
         <h2>Leaderboards</h2>
-        <p class="lb-sub">Global ladder · Masters II and above · ranked by Elo${
+        <p class="lb-sub">Global ladder · Legendary I and above · ranked by Elo${
           L.updated ? ` · synced ${esc(whenShort(L.updated))}` : ""}</p>
         <div class="lb-pills">
           ${pill("", "🌍 All", all)}
