@@ -2,9 +2,9 @@ import { PROXY_URL } from "./config.js";
 
 export const EXAMPLE_MATCHERINO = "https://matcherino.com/supercell/tournaments/224155/bracket/match-252419794";
 export const MATCH_METRICS = [
-  ["kills", "Kills", "⚔"], ["deaths", "Deaths", "☠"], ["damageDealt", "Damage", "✦"],
-  ["healingDone", "Healing", "♥"], ["damageReceived", "Damage taken", "⬡"],
-  ["gadgetUsedCount", "Gadgets used", "◉"], ["superUsedCount", "Supers used", "★"],
+  ["kills", "Kills", "kills"], ["deaths", "Deaths", "deaths"], ["damageDealt", "Damage", "damage"],
+  ["healingDone", "Healing", "healing"], ["damageReceived", "Damage taken", "shield"],
+  ["gadgetUsedCount", "Gadgets used", "gadget"], ["superUsedCount", "Supers used", "super"],
 ];
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const number = value => typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("en-US") : "—";
@@ -63,8 +63,8 @@ function playerCard(player, set) {
   }).join("");
   return `<article class="mt-player"><h4>${esc(player.name)}</h4><p class="mt-tag">${esc(player.tag)}</p>
     <div class="mt-portraits">${portraits}</div>
-    <dl>${MATCH_METRICS.map(([key, label, icon]) => `<div><dt><span aria-hidden="true">${icon}</span> ${label}</dt><dd>${number(player.totals[key])}</dd></div>`).join("")}
-      <div class="mt-ping"><dt>◴ Ping</dt><dd>${player.ping.map(p => `<span>Game ${p.game}: ${number(p.value)}${typeof p.value === "number" ? " ms" : ""}</span>`).join("")}</dd></div>
+    <dl>${MATCH_METRICS.map(([key, label, icon]) => `<div><dt><img class="mt-stat-icon" src="./assets/stats/${icon}.webp" alt="" width="18" height="18"> ${label}</dt><dd>${number(player.totals[key])}</dd></div>`).join("")}
+      <div class="mt-ping"><dt>Ping</dt><dd>${player.ping.map(p => `<span>Game ${p.game}: ${number(p.value)}${typeof p.value === "number" ? " ms" : ""}</span>`).join("")}</dd></div>
     </dl>${player.appearances < set.games.length ? `<p class="mt-partial">Stats from ${player.appearances} of ${set.games.length} reported games</p>` : ""}
     </article>`;
 }
