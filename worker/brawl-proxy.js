@@ -19,6 +19,130 @@ const API = "https://bsproxy.royaleapi.dev/v1";
 const TAG = /^[0289PYLQGRJCUV]{3,14}$/; // the only characters Supercell uses in tags
 const TTL = 60; // seconds a reply is reused for, so the key's rate limit lasts
 
+// Public Matcherino reports; no session cookies or Brawl Stars key are forwarded.
+const MATCHERINO = "https://api.matcherino.com/__api";
+const METRICS = ["kills", "deaths", "damageDealt", "healingDone", "damageReceived",
+  "gadgetUsedCount", "superUsedCount", "averageLatency"];
+const numeric = v => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
+const publicImage = value => {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" && ["cdn.matcherino.com", "cdn.brawlify.com"].includes(u.hostname) ? u.href : "";
+  } catch { return ""; }
+};
+
+export function normalizeMatcherino(match, bracket, locations = [], brawlers = []) {
+  const locationById = new Map(locations.map(x => [x.id, x]));
+  const brawlerById = new Map(brawlers.map(x => [x.id, x]));
+  const sides = [match.entrantA, match.entrantB];
+  const teams = sides.map((s, i) => {
+    const entrant = s?.entrant || bracket.entrants?.find(x => x.id === s?.entrantId) || {};
+    const members = entrant.team?.members || [];
+    return { id: s?.entrantId || 0, name: entrant.name || `Team ${i + 1}`,
+      score: numeric(s?.score), seed: numeric(entrant.seed),
+      players: members.filter(p => p.inTeamFixture !== false).map(p => ({
+        name: p.displayName || "Player", tag: p.participantInfo?.gameUsername || "",
+      })) };
+  });
+  const brawler = b => {
+    const id = typeof b === "number" ? b : b?.id;
+    const known = brawlerById.get(id);
+    return { id: id || 0, name: (typeof b === "object" && b?.name) || known?.name || "Unknown brawler",
+      image: publicImage(b?.image || known?.image),
+      gadget: b?.gadget?.name || "", starPower: b?.starPower?.name || "" };
+  };
+  const location = raw => {
+    const known = locationById.get(raw?.id);
+    const id = raw?.id || 0;
+    return { id, name: raw?.name || known?.name || "Map not reported",
+      mode: raw?.gameMode || known?.gameMode || "",
+      image: id ? `https://cdn.brawlify.com/maps/regular/${id}.png` : "" };
+  };
+  // Keep the last report per game, rather than counting duplicate submissions.
+  const reports = new Map();
+  for (const r of match.reports || []) {
+    if (Number.isInteger(r.setNumber) && r.setNumber > 0 && Number.isInteger(r.gameNumber) && r.gameNumber > 0) {
+      reports.set(`${r.setNumber}:${r.gameNumber}`, r);
+    }
+  }
+  const sets = new Map();
+  for (const r of [...reports.values()].sort((a, b) => a.setNumber - b.setNumber || a.gameNumber - b.gameNumber)) {
+    const p = r.properties || {};
+    if (!sets.has(r.setNumber)) sets.set(r.setNumber, { number: r.setNumber, games: [] });
+    // Match-level location is only a fallback: detailed reports carry each game's map.
+    const map = location(p.location || { id: match.brawlStarsMatchLocationId });
+    const reportTeams = Array.isArray(p.teams) ? p.teams : [];
+    // Orient report teams using roster tags; do not assume provider order is stable.
+    const populated = match.populateBrawlerNames || {};
+    const tagSets = sides.map(s => new Set((s?.entrant?.team?.members || []).map(m =>
+      populated[m.userId]?.playerTag || m.participantInfo?.gameUsername).filter(Boolean)));
+    const aligned = [null, null];
+    reportTeams.forEach((t, index) => {
+      const counts = tagSets.map(tags => (t.players || []).filter(p => tags.has(p.tag)).length);
+      const side = counts[0] > counts[1] ? 0 : counts[1] > counts[0] ? 1 : index;
+      if (side < 2 && !aligned[side]) aligned[side] = t;
+    });
+    const gameTeams = aligned.map((t, index) => ({
+      id: teams[index].id, bans: (t?.bans || []).map(brawler),
+      players: (t?.players || []).map(player => {
+        const entry = Object.values(populated).find(x => x.playerTag === player.tag);
+        const member = sides[index]?.entrant?.team?.members?.find(x => x.participantInfo?.gameUsername === player.tag);
+        return { tag: player.tag || "", name: entry?.name || member?.displayName || player.tag || "Player",
+          brawler: brawler(player.brawler),
+          stats: Object.fromEntries(METRICS.map(k => [k, numeric(player.statistics?.[k])])) };
+      }),
+    }));
+    sets.get(r.setNumber).games.push({ number: r.gameNumber, winner: r.winner || null,
+      score: [numeric(r.scoreA), numeric(r.scoreB)], draw: numeric(r.scoreDraw),
+      duration: numeric(p.duration), map, teams: gameTeams });
+  }
+  return { tournamentId: bracket.bountyId, matchId: match.id, round: match.roundNum,
+    status: match.status || "unknown", winner: match.winner || null,
+    sourceUrl: `https://matcherino.com/supercell/tournaments/${bracket.bountyId}/bracket/match-${match.id}`,
+    fetchedAt: Date.now(), teams, sets: [...sets.values()] };
+}
+
+async function matcherinoGet(path) {
+  const response = await fetch(MATCHERINO + path, { headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(15000), redirect: "error" });
+  if (!response.ok) throw new Error(response.status === 429 ? "Matcherino is busy. Try again shortly." : "Matcherino couldn't provide that match.");
+  const payload = await response.json();
+  if (payload.status !== 200 || payload.body == null) throw new Error("Matcherino couldn't provide that match.");
+  return payload.body;
+}
+
+async function matcherinoRoute(url, head, ctx) {
+  const tournamentId = url.searchParams.get("tournament");
+  const matchId = url.searchParams.get("match");
+  if (!/^[1-9]\d{0,11}$/.test(tournamentId || "") || !/^[1-9]\d{0,11}$/.test(matchId || "")) {
+    return json({ error: "Paste a Matcherino link that includes a tournament and a match." }, 400, head);
+  }
+  const cache = caches.default;
+  const key = new Request(`https://brawl-proxy.invalid/matcherino/${tournamentId}/${matchId}`);
+  const hit = await cache.match(key);
+  if (hit) return withHeaders(hit, head);
+  try {
+    const [match, brackets] = await Promise.all([
+      matcherinoGet(`/brackets/match?matchId=${matchId}`), matcherinoGet(`/brackets?bountyId=${tournamentId}`),
+    ]);
+    const bracket = Array.isArray(brackets) && brackets.find(b => b.published && b.id === match.bracketId &&
+      b.bountyId === Number(tournamentId) && b.matches?.some(m => m.id === Number(matchId)));
+    if (!bracket || match.id !== Number(matchId)) return json({ error: "That match isn't in this public tournament." }, 404, head);
+    const [locations, brawlers] = await Promise.all([
+      matcherinoGet("/games/brawlstars/match/locations").catch(() => []),
+      matcherinoGet("/games/brawlstars/brawlers").catch(() => []),
+    ]);
+    const data = normalizeMatcherino(match, bracket, locations, brawlers);
+    const response = new Response(JSON.stringify(data), { headers: {
+      "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=60",
+    } });
+    ctx.waitUntil(cache.put(key, response.clone()));
+    return withHeaders(response, head);
+  } catch {
+    return json({ error: "Couldn't load Matcherino reports. The match may be unavailable; try again shortly." }, 502, head);
+  }
+}
+
 const paths = {
   player: tag => `/players/%23${tag}`,
   battlelog: tag => `/players/%23${tag}/battlelog`,
@@ -241,6 +365,8 @@ export default {
     }
     const url = new URL(request.url);
     const [, kind, rawTag] = url.pathname.split("/");
+
+    if (kind === "matcherino") return matcherinoRoute(url, head, ctx);
 
     // Where to measure latency to, for the ping check. GCPing runs a tiny service in
     // every Google Cloud region for exactly this; the list is fetched here so the

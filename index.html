@@ -273,6 +273,64 @@ legend { font: 18px/1 var(--display); margin-bottom: 8px; }
 .bwrap { display: inline-flex; align-items: center; gap: 7px; }
 .bimg { width: 28px; height: 28px; border-radius: 6px; background: var(--paper); object-fit: cover; }
 
+
+/* Matcherino: a set board with six player cards, matching the existing team colours. */
+.mt-form { max-width: none; }
+.mt-form .addrow { margin: 8px 0; }
+.mt-form input { text-transform: none; min-width: min(400px, 100%); }
+.mt-error { padding: 16px; background: var(--red-soft); color: #8F1426; border-radius: 10px; }
+.mt-matchhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 24px 0; }
+.mt-matchhead h2 { margin: 0; }
+.mt-matchhead h2 span { color: var(--blue); white-space: nowrap; }
+.mt-matchhead a { text-decoration: none; }
+.mt-set { background: #10141E; color: #fff; border: 2px solid var(--ink); border-radius: 16px; padding: 16px; margin: 18px 0; }
+.mt-sethead { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 14px; flex-wrap: wrap; }
+.mt-sethead h3 { margin: 0; }
+.mt-sethead span, .mt-coverage { color: #C9D2E6; font-size: 13px; }
+.mt-board { display: grid; grid-template-columns: 110px 1fr 1fr; gap: 12px; align-items: stretch; }
+.mt-maps { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.mt-maps img { width: 100%; height: auto; border-radius: 6px; }
+.mt-maps span { color: #C9D2E6; font-size: 11px; }
+.mt-side { min-width: 0; border-radius: 10px; padding: 12px; }
+.mt-side-0 { background: linear-gradient(180deg, #173C9A, #131B32); }
+.mt-side-1 { background: linear-gradient(180deg, #991D30, #32151A); }
+.mt-sidehead { display: flex; flex-direction: column; gap: 6px; text-align: center; margin-bottom: 16px; }
+.mt-sidehead > span { font: italic 30px/1.1 var(--display); color: var(--gold); text-shadow: 0 3px #000; }
+.mt-sidehead strong { font: 22px/1.2 var(--display); overflow-wrap: anywhere; }
+.mt-sidehead b { font-size: 13px; opacity: .8; }
+.mt-players { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mt-player { background: rgba(0,0,0,.22); border-radius: 8px; padding: 8px; min-width: 0; }
+.mt-player h4 { font: 17px/1.2 var(--display); margin: 0; overflow-wrap: anywhere; }
+.mt-tag { color: #D2D9EA; font-size: 10px; overflow-wrap: anywhere; margin: 4px 0 8px; }
+.mt-portraits { display: flex; gap: 4px; overflow-x: auto; }
+.mt-portrait { min-width: 70px; flex: 1; }
+.mt-portrait img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+.mt-portrait > span { display: block; font-size: 10px; font-weight: 800; margin-top: 3px; }
+.mt-portrait small { display: block; font-size: 9px; color: #D2D9EA; }
+.mt-noimage { background: rgba(255,255,255,.1); aspect-ratio: 1; display: grid; place-items: center; font: 40px var(--display); }
+.mt-player dl { margin: 12px 0 0; }
+.mt-player dl > div { margin: 7px 0; display: flex; gap: 4px; align-items: center; justify-content: space-between; }
+.mt-player dt { font-size: 9px; color: #D2D9EA; max-width: 44px; }
+.mt-player dd { margin: 0; font: 19px/1.2 var(--display); font-variant-numeric: tabular-nums; }
+.mt-player dl > .mt-ping { display: block; }
+.mt-ping dd span { display: block; font: 11px/1.6 var(--body); font-weight: 800; }
+.mt-partial, .mt-bans { font-size: 11px; color: #D2D9EA; }
+.mt-games { border-top: 1px solid #394154; padding-top: 10px; font-size: 13px; }
+.mt-games summary { cursor: pointer; font-weight: 800; }
+@media (max-width: 1000px) {
+  .mt-board { grid-template-columns: 1fr 1fr; }
+  .mt-maps { grid-column: 1 / -1; flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .mt-maps img { width: 72px; max-height: 120px; object-fit: contain; }
+}
+@media (max-width: 700px) {
+  .mt-board { grid-template-columns: 1fr; }
+  .mt-player dl > div { display: block; }
+  .mt-player dt { max-width: none; }
+  .mt-player dd { font-size: 23px; }
+  .mt-set { padding: 10px; }
+  .mt-side { padding: 10px; }
+}
+
 .toast { position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); transform: translate(-50%, 140%); background: var(--ink); color: #fff;
   padding: 10px 18px; border-radius: 10px; font-weight: 800; max-width: calc(100% - 32px); transition: transform .2s, opacity .2s; z-index: 20; opacity: 0; pointer-events: none; }
 .toast.show { transform: translate(-50%, 0); opacity: 1; }
