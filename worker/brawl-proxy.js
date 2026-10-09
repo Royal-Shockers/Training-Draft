@@ -104,8 +104,8 @@ export function normalizeMatcherino(match, bracket, locations = [], brawlers = [
 
 async function matcherinoGet(path) {
   const response = await fetch(MATCHERINO + path, { headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(15000), redirect: "error" });
-  if (!response.ok) throw new Error(response.status === 429 ? "Matcherino is busy. Try again shortly." : "Matcherino couldn't provide that match.");
+    signal: AbortSignal.timeout(15000), redirect: "manual" });
+  if (!response.ok) throw new Error(response.status === 429 ? "Matcherino is busy. Try again shortly." : `Matcherino HTTP ${response.status}`);
   const payload = await response.json();
   if (payload.status !== 200 || payload.body == null) throw new Error("Matcherino couldn't provide that match.");
   return payload.body;
@@ -138,7 +138,8 @@ async function matcherinoRoute(url, head, ctx) {
     } });
     ctx.waitUntil(cache.put(key, response.clone()));
     return withHeaders(response, head);
-  } catch {
+  } catch (error) {
+    console.error("Matcherino lookup failed:", error.message);
     return json({ error: "Couldn't load Matcherino reports. The match may be unavailable; try again shortly." }, 502, head);
   }
 }

@@ -67,7 +67,8 @@ test('worker rejects invalid IDs and mismatched tournament; valid reads need no 
   const ctx = { waitUntil(p) { pending.push(p); } };
   let calls = 0;
   globalThis.caches = { default: { match: async () => undefined, put: async () => {} } };
-  globalThis.fetch = async url => {
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.redirect, "manual", "Cloudflare supports manual or follow redirects");
     calls++;
     const path = new URL(url).pathname;
     assert.equal(new URL(url).hostname, 'api.matcherino.com');
