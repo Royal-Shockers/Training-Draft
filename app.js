@@ -6,6 +6,7 @@ import { readBattles, toSessions, aggregate, extreme, pretty } from "./bsstats.j
 import { fetchPingTargets } from "./bsapi.js";
 import { GROUPS, SERVERS, bandOf } from "./servers.js";
 import { measureAll } from "./ping.js";
+import { fetchMatcherino, viewMatcherino, EXAMPLE_MATCHERINO } from "./matcherino.js";
 
 // ---------------- state ----------------
 const saved = (() => { try { return JSON.parse(localStorage.getItem("btt-ui")) || {}; } catch { return {}; } })();
@@ -14,6 +15,7 @@ const state = {
   matches: [],
   user: undefined,             // undefined = loading, null = signed out
   readError: "",
+  matcherino: { link: "", loading: false, error: "", data: null },
   section: "tracker",          // which part of the site; tabs below are scoped to it
   ladder: null,                // { loading, error, season, total, updated, players, tiers }
   ladderShown: 100,
@@ -54,13 +56,14 @@ const today = () => {
 
 // Top-level sections. Add a new one here plus its tabs, and the nav picks it up.
 const SECTIONS = [["tracker", "Match tracker"], ["players", "Player lookup"], ["ladder", "Ranked ladder"],
-  ["ping", "Ping check"]];
+  ["ping", "Ping check"], ["matcherino", "Matcherino stats"]];
 const SECTION_TABS = {
   tracker: [["dashboard", "Dashboard"], ["log", "Log match"], ["matches", "Matches"],
     ["team", "Team"], ["enemy", "Enemy"], ["lists", "Lists"]],
   players: [],   // the Players view carries its own subtabs
   ladder: [],
   ping: [],
+  matcherino: [],
 };
 
 let names = { b: new Map(), map: new Map(), mode: new Map() };
@@ -821,6 +824,23 @@ function viewPing() {
       ≈ have no datacentre in that city and are measured to the nearest one.</p>`;
 }
 
+// ---------------- Matcherino stats ----------------
+let matcherinoRun = 0;
+async function loadMatcherino(link) {
+  const run = ++matcherinoRun;
+  state.matcherino = { link, loading: true, error: "", data: null };
+  render();
+  try {
+    const data = await fetchMatcherino(link);
+    if (run !== matcherinoRun) return;
+    state.matcherino = { link, loading: false, error: "", data };
+  } catch (e) {
+    if (run !== matcherinoRun) return;
+    state.matcherino = { link, loading: false, error: e.message || "Couldn't load Matcherino stats.", data: null };
+  }
+  render();
+}
+
 // ---------------- render ----------------
 function render() {
   renderTop();
@@ -828,6 +848,7 @@ function render() {
   // These read the live API, not your database, so they work before the lists load.
   if (state.section === "players") { el.innerHTML = viewPlayers(); return; }
   if (state.section === "ladder") { el.innerHTML = viewLadder(); return; }
+  if (state.section === "matcherino") { el.innerHTML = viewMatcherino(state.matcherino, PROXY_READY); return; }
   if (state.section === "ping") { el.innerHTML = viewPing(); return; }
   if (state.readError && !state.lists) {
     el.innerHTML = `<div class="notice"><h2>Sign in to see the stats</h2><p>${esc(state.readError)}</p>
@@ -1015,6 +1036,7 @@ function onClick(e) {
     }
     case "loadtag": state.tagInput = "#" + normTag(id); loadProfile(id); break;
     case "reloadladder": loadLadder(state.ladderShown); break;
+    case "matcherino-example": state.matcherino.link = EXAMPLE_MATCHERINO; render(); break;
     case "reping": runPing(); break;
     case "moreladder": state.ladderShown += 100; loadLadder(state.ladderShown); break;
     case "refreshprofile": forget(state.profile.tag); loadProfile(state.profile.tag); break;
@@ -1064,6 +1086,7 @@ function onChange(e) {
 }
 
 function onInput(e) {
+  if (e.target.name === "matcherinoLink") { state.matcherino.link = e.target.value; return; }
   if (e.target.name === "tag") { state.tagInput = e.target.value; return; } // no re-render: keeps the caret put
   if (e.target.dataset.act === "search") {
     state.search = e.target.value; state.rowLimit = 300;
@@ -1078,6 +1101,7 @@ function onSubmit(e) {
   const kind = form.dataset.form;
   if (!kind) return;
   e.preventDefault();
+  if (kind === "matcherino") { loadMatcherino(form.elements.matcherinoLink.value); return; }
   if (kind === "log") {
     const f = state.form;
     const m = { date: f.date, mode: f.mode, map: f.map, blue: f.blue, red: f.red, result: f.result };

@@ -124,3 +124,36 @@ else can trigger it.
   hypercharge. Everything else — ranked win rates, per-map and per-brawler records, sessions,
   teammate and opponent records — is worked out here from the battle log.
 - Supercell's API goes down during game updates. The tab says so when that happens.
+
+## Matcherino stats
+
+The new `/matcherino?tournament=224155&match=252419794` route reads public Matcherino
+bracket match reports. It requires no additional secret and does not depend on the
+Brawl Stars API key or the ladder database. Update the deployed Worker with the
+current **entire `brawl-proxy.js`** before publishing the frontend changes.
+
+In the Cloudflare dashboard, open your existing `brawl-proxy` Worker, choose **Edit
+code**, replace its source with `worker/brawl-proxy.js`, and deploy. Existing
+secrets and database bindings stay attached. Alternatively run `npx wrangler deploy`
+from this directory with the existing account and D1 binding configured.
+
+Verification: open the Matcherino route above. It should return teams, sets, and
+game reports. Match `252419762` in the same tournament includes detailed player
+statistics and is useful for checking portraits and the stat cards. The supplied
+match `252419794` has score reports but no detailed player statistics.
+
+The page shows set totals for kills, deaths, damage, healing, damage taken, gadgets,
+and supers. Average latency is shown per game in milliseconds rather than summed.
+Missing statistics are displayed as unavailable, not zero. The route verifies that
+the match belongs to the requested published bracket and returns only the fields
+needed for the page, excluding account authentication IDs and other source metadata.
+
+Matcherino's endpoints are used by its public website but are not a documented,
+guaranteed third-party API. A provider change could require an adapter update.
+Images use Matcherino's supplied brawler portraits and Brawlify's map CDN.
+
+Run regression checks from the repository root:
+
+```sh
+node --test tests/matcherino.test.mjs
+```
